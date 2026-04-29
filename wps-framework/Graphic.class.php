@@ -17,7 +17,8 @@ class Graphic
         foreach ($fields_args as $field_args) {
 
             if (isset($field_args[0])) {
-                $output .= "<block class='wps-boxed--light'>" . self::generate_fields($field_args, $infos, $args, false) . "</block>";
+                // Usa wps-block con data-expandable invece di wps-boxed--light
+                $output .= "<wps-block class='wps-boxed--light'>" . self::generate_fields($field_args, $infos, $args, false) . "</wps-block>";
                 continue;
             }
 
@@ -443,7 +444,7 @@ class Graphic
                 <input name="<?php echo $args['input_name']; ?>" id="<?php echo $args['id']; ?>"
                        type="<?php echo $editable ? 'text' : 'hidden' ?>"
                        value="<?php echo $args['value']; ?>" autocomplete="off" <?php echo $parent; ?>
-                       placeholder="<?php _e("Choose a type or enter one manually.", 'wps'); ?>">
+                       placeholder="Choose a type or enter one manually.">
                 <?php if (!$editable) : ?>
                     <strong class="width100 wps-input"
                             data-input="<?php echo $args['id']; ?>"><?php echo $args['valueE'] ?? $args['value']; ?></strong>

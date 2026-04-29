@@ -32,15 +32,17 @@ class RequestActions
             return;
         }
 
-        if (!empty($_REQUEST[self::$nonce_name]) and !UtilEnv::verify_nonce(self::$nonce_action, $_REQUEST[self::$nonce_name])) {
+        $nonce = $_REQUEST[self::$nonce_name] ?? '';
+
+        if (!is_string($nonce) || '' === $nonce || !UtilEnv::verify_nonce(self::$nonce_action, $nonce)) {
 
             if (!wp_doing_ajax()) {
                 return;
             }
 
             Ajax::response([
-                'body'  => __('It seems that you are not allowed to do this request.', 'wps'),
-                'title' => __('Request error', 'wps')
+                'body'  => "It seems that you are not allowed to do this request.",
+                'title' => "Request error"
             ], 'error');
         }
 
@@ -55,8 +57,8 @@ class RequestActions
         }
 
         Ajax::response([
-            'body'  => $response ?: __('It seems that you are not allowed to do this request.', 'wps'),
-            'title' => $response ? __('Request response', 'wps') : __('Request error', 'wps')
+            'body'  => $response ?: "It seems that you are not allowed to do this request.",
+            'title' => $response ? "Request response" : 'Request error'
         ], $response ? 'success' : 'error');
     }
 
