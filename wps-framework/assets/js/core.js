@@ -6,16 +6,13 @@
 
 "use strict";
 
-(function ($, window, noGlobal) {
+(function ($, window) {
     if (!$) return null;
 
     let guid = 1,
-        semaphoreList = {},
-        cacheKeys = [],
-        wpsCore = {ux: {}, options: {}, cache: {}};
+        semaphoreList = {};
 
-    const toString = Object.prototype.toString,
-        hasOwn = Object.prototype.hasOwnProperty;
+    const toString = Object.prototype.toString;
 
     const wps = function (selector, context) {
         return new wps.fn.init(selector, context);
@@ -32,143 +29,17 @@
     wps.prototype = $.prototype;
     wps.extend = wps.fn.extend = $.extend;
 
-    wps.extend(wpsCore, {
-        setup: function () {
-            const matchLandscape = window.matchMedia("(orientation: landscape)");
-            wps.addUX({
-                'is-landscape': () => matchLandscape.matches,
-                'is-mobile': () => {
-                    const w = screen.availWidth, h = screen.availHeight;
-                    return wps.getUX('is-landscape') ? (w <= 1366 || h <= 1024) : (w <= 1024 || h <= 1366);
-                },
-                'is-phone': () => (screen.availWidth <= 480 || screen.availHeight <= 480),
-                'is-tablet': () => wps.getUX('is-mobile') && !wps.getUX('is-phone'),
-                'is-laptop': () => !wps.getUX('is-mobile')
-            });
-        }
-    });
-
-    wps.cache = {
-        add(key, value) {
-            const cacheKey = key + " ";
-            if (cacheKeys.push(cacheKey) > 250) {
-                delete wpsCore.cache[cacheKeys.shift()];
-            }
-            return (wpsCore.cache[cacheKey] = value);
-        },
-        remove(key) {
-            const cacheKey = key + " ", idx = cacheKeys.indexOf(cacheKey);
-            if (idx > -1) {
-                cacheKeys.splice(idx, 1);
-                delete wpsCore.cache[cacheKey];
-            }
-        },
-        get: (key, default_ = false) => {
-            const cacheKey = key + " ";
-            return hasOwn.call(wpsCore.cache, cacheKey) ? wpsCore.cache[cacheKey] : default_;
-        }
-    };
-
     wps.extend({
         getUID: () => guid++,
-        isDefined: (value, not = false) => value !== null && value !== undefined ? (not === false || value) : not,
-        isArray: function (item, not = false) {
-            return this.isDefined(item) && Array.isArray(item) ? (not === false || item) : not;
-        },
         isObject: function (item, not = false) {
-            return this.isDefined(item) && toString.call(item) === '[object Object]' ? (not === false || item) : not;
+            return item !== null && item !== undefined && toString.call(item) === '[object Object]' ? (not === false || item) : not;
         },
         isFunction: $.isFunction,
         isjQuery: o => !!(o && o instanceof jQuery),
-        isNode: o => !!(o && (o.nodeType === 1 || o.nodeType === 9 || o.nodeType === 11)),
-        isElement: o => !!(o && o.nodeType === 1),
-
-        booleanize(string, strict = false) {
-            if (!string) return false;
-            if (typeof string === 'string') {
-                switch (string.toLowerCase().trim()) {
-                    case "true":
-                    case "si":
-                    case "yes":
-                    case "1":
-                    case "on":
-                        return true;
-                    case "false":
-                    case "no":
-                    case "0":
-                    case "off":
-                        return false;
-                }
-            }
-            return strict ? string === true : Boolean(string);
-        },
-
-        removeEmpty(item, deFault = null, strict = false) {
-            if (!this.isDefined(item)) return deFault;
-            if (this.isObject(item)) {
-                if ($.isEmptyObject(item)) return deFault;
-                for (const propName in item) {
-                    if (hasOwn.call(item, propName)) {
-                        item[propName] = this.removeEmpty(item[propName], null, strict);
-                        if (!this.isDefined(item[propName])) delete item[propName];
-                    }
-                }
-                return $.isEmptyObject(item) ? deFault : item;
-            }
-            if (this.isArray(item)) {
-                if (!item.length) return deFault;
-                const filtered = item
-                    .map(el => this.removeEmpty(el, null, strict))
-                    .filter(el => this.isDefined(el) && (!this.isArray(el) || el.length > 0));
-                return filtered.length ? filtered : deFault;
-            }
-            return (!strict || this.booleanize(item)) ? item : deFault;
-        },
-
-        parse_args_deep(deFault, ...sources) {
-            for (const source of sources) {
-                if (this.isObject(deFault) && this.isObject(source)) {
-                    for (const key in source) {
-                        if (hasOwn.call(source, key)) {
-                            deFault[key] = this.isObject(source[key])
-                                ? this.parse_args_deep(deFault[key] || {}, source[key])
-                                : source[key];
-                        }
-                    }
-                }
-            }
-            return deFault;
-        },
 
         parse_args: function (deFault, ...sources) {
             return this.isObject(deFault) ? Object.assign(deFault, ...sources.filter(s => this.isObject(s))) : deFault;
         },
-
-        filter_args_deep(deFault, ...sources) {
-            for (const source of sources) {
-                if (this.isObject(deFault) && this.isObject(source)) {
-                    for (const key in source) {
-                        if (hasOwn.call(deFault, key)) {
-                            deFault[key] = this.isObject(deFault[key])
-                                ? this.filter_args_deep(deFault[key], source[key] || {})
-                                : source[key];
-                        }
-                    }
-                }
-            }
-            return deFault;
-        },
-
-        filter_args(deFault, ...sources) {
-            if (!this.isObject(deFault)) return Object.assign({}, ...sources);
-            const merged = Object.assign({}, ...sources);
-            for (const key in deFault) {
-                if (hasOwn.call(merged, key)) deFault[key] = merged[key];
-            }
-            return deFault;
-        },
-
-        delete: (array, position = 0) => (delete array[position], array),
 
         maybe_exec(item, runtime_args = null, context = null, asFilter = false) {
             if (this.isFunction(item)) return item.call(context, runtime_args);
@@ -176,36 +47,6 @@
                 return item.callback.call(context, item.args, runtime_args);
             }
             return asFilter ? runtime_args : item;
-        },
-
-        serialize(obj, prefix) {
-            const str = [];
-            for (const p in obj) {
-                if (hasOwn.call(obj, p)) {
-                    const k = prefix ? `${prefix}[${p}]` : p, v = obj[p];
-                    str.push(v !== null && typeof v === "object"
-                        ? this.serialize(v, k)
-                        : `${encodeURIComponent(k)}=${encodeURIComponent(v)}`);
-                }
-            }
-            return str.join("&");
-        },
-
-        domPath(elem, path) {
-            const parts = path.replace(/\[(\w+)]/g, '.$1').replace(/^\./, '').split('.');
-            for (const k of parts) {
-                if (!(k in elem)) return undefined;
-                elem = elem[k];
-            }
-            return elem;
-        },
-
-        addUX: ux => wps.extend(wpsCore.ux, ux),
-        getUX: (item, default_ = '', args = null) => hasOwn.call(wpsCore.ux, item) ? wps.maybe_exec(wpsCore.ux[item], args) : default_,
-        removeUX(item) {
-            if (!hasOwn.call(wpsCore.ux, item)) return false;
-            delete wpsCore.ux[item];
-            return true;
         },
 
         json: {
@@ -221,48 +62,6 @@
             }
         },
 
-        storage: {
-            add(key, value, limit = null) {
-                if (limit !== null) {
-                    const items = this.get(key, []);
-                    items.unshift(value);
-                    if (items.length > limit) items.length = limit;
-                    value = items;
-                }
-                localStorage.setItem(key, wps.json.stringify(value));
-            },
-            get: (key, deFault = {}) => wps.json.parse(localStorage.getItem(key), deFault),
-            remove(key, index = null) {
-                const storage = this.get(key, []);
-                if (index !== null) {
-                    const removed = storage.splice(index, 1);
-                    this.add(key, storage);
-                    return removed;
-                }
-                localStorage.removeItem(key);
-                return storage;
-            }
-        },
-
-        hash(string, length = 12) {
-            const dictionary = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-            const hash = new Array(length);
-            let seed = 0x1539;
-            const len = string.length;
-            if (len) {
-                const half = len >> 1;
-                seed = ((seed << 5) - seed + len + string.charCodeAt(0)) | 0;
-                for (let i = 0; i < half; i++) {
-                    seed = ((seed << 5) - seed) + string.charCodeAt(i) - string.charCodeAt(len - i - 1);
-                }
-            }
-            for (let i = 0; i < length; i++) {
-                seed = (214013 * seed + 2531011) >>> 2;
-                hash[i] = dictionary[seed % 62];
-            }
-            return hash.join('');
-        },
-
         semaphore: {
             release: (context = 'core') => {
                 semaphoreList[context] = false;
@@ -275,9 +74,13 @@
 
         ajaxHandler(options) {
             options = wps.parse_args({
-                mod: 'none', mod_action: 'none', mod_nonce: '', mod_args: '', mod_form: '',
+                mod: 'none', mod_context: '', mod_action: 'none', mod_nonce: '', mod_args: '', mod_form: '',
                 use_loading: false, callback: null
             }, options);
+
+            if (!options.mod_context) {
+                options.mod_context = wps.currentAdminContext();
+            }
 
             wps.semaphore.lock(options.mod_action);
             if (options.use_loading) options.use_loading.addClass("wps-loader");
@@ -285,7 +88,7 @@
             $.ajax({
                 url: ajaxurl, type: "GET", dataType: "json", global: false, cache: false,
                 data: {
-                    action: 'wps', mod: options.mod, mod_action: options.mod_action,
+                    action: 'wps', mod: options.mod, mod_context: options.mod_context, mod_action: options.mod_action,
                     mod_nonce: options.mod_nonce, mod_args: options.mod_args, mod_form: options.mod_form
                 },
                 complete(jqXHR) {
@@ -325,179 +128,69 @@
                 });
                 $this.append(fragment);
             }
-        },
-
-        TextBoxHighlighter(options) {
-            return this.each(function () {
-                const $this = $(this);
-                let plugin = $this.data(wps.ui.textBoxHighLighter.id);
-                if (plugin) plugin.destroy();
-                plugin = wps.ui.textBoxHighLighter.init($this, options);
-                if (plugin.isGenerated) $this.data(wps.ui.textBoxHighLighter.id, plugin);
-            });
         }
     });
 
     wps.ui = {
-        textBoxHighLighter: {
-            id: 'hwt',
-            init($el, config) {
-                this.$el = $el;
-                if (this.getType(config) === 'function') config = {highlight: config};
-                if (this.getType(config) === 'custom') {
-                    this.highlight = config;
-                    this.generate();
-                }
-                return this;
-            },
-            getType(instance) {
-                if (!instance) return 'falsey';
-                if (Array.isArray(instance)) {
-                    return (instance.length === 2 && typeof instance[0] === 'number' && typeof instance[1] === 'number') ? 'range' : 'array';
-                }
-                const type = typeof instance;
-                if (type === 'object') {
-                    if (instance instanceof RegExp) return 'regexp';
-                    if (hasOwn.call(instance, 'highlight')) return 'custom';
-                }
-                return (type === 'function' || type === 'string') ? type : 'other';
-            },
-            generate() {
-                const id = this.id;
-                this.$el.addClass(`${id}-input ${id}-content`)
-                    .on(`input.${id}`, this.handleInput.bind(this))
-                    .on(`scroll.${id}`, this.handleScroll.bind(this));
-                this.$highlights = $('<div>', {class: `${id}-highlights ${id}-content`});
-                this.$backdrop = $('<div>', {class: `${id}-backdrop`}).append(this.$highlights);
-                this.$container = $('<div>', {class: `${id}-container`})
-                    .insertAfter(this.$el).append(this.$backdrop, this.$el)
-                    .on('scroll', this.blockContainerScroll.bind(this));
-                this.browser = this.detectBrowser();
-                if (this.browser === 'firefox') this.fixFirefox();
-                else if (this.browser === 'ios') this.fixIOS();
-                this.isGenerated = true;
-                this.handleInput();
-            },
-            detectBrowser() {
-                const ua = navigator.userAgent.toLowerCase();
-                if (ua.includes('firefox')) return 'firefox';
-                if (/msie|trident\/7|edge/.test(ua)) return 'ie';
-                if (/ipad|iphone|ipod/.test(ua) && !ua.includes('windows phone')) return 'ios';
-                return 'other';
-            },
-            fixFirefox() {
-                const p = this.$highlights.css(['padding-top', 'padding-right', 'padding-bottom', 'padding-left']);
-                const b = this.$highlights.css(['border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width']);
-                this.$highlights.css({padding: 0, 'border-width': 0});
-                this.$backdrop.css({
-                    'margin-top': `+=${p['padding-top']}`, 'margin-right': `+=${p['padding-right']}`,
-                    'margin-bottom': `+=${p['padding-bottom']}`, 'margin-left': `+=${p['padding-left']}`
-                }).css({
-                    'margin-top': `+=${b['border-top-width']}`, 'margin-right': `+=${b['border-right-width']}`,
-                    'margin-bottom': `+=${b['border-bottom-width']}`, 'margin-left': `+=${b['border-left-width']}`
-                });
-            },
-            fixIOS() {
-                this.$highlights.css({'padding-left': '+=3px', 'padding-right': '+=3px'});
-            },
-            handleInput() {
-                const input = this.$el.val();
-                const ranges = this.getRanges(input, this.highlight);
-                const unstaggered = this.removeStaggeredRanges(ranges);
-                this.renderMarks(this.getBoundaries(unstaggered));
-            },
-            getRanges(input, highlight) {
-                const type = this.getType(highlight);
-                const handlers = {
-                    array: () => highlight.flatMap(h => this.getRanges(input, h)),
-                    function: () => this.getRanges(input, highlight(input)),
-                    regexp: () => {
-                        const ranges = [];
-                        let match;
-                        while ((match = highlight.exec(input)) !== null) {
-                            ranges.push([match.index, match.index + match[0].length]);
-                            if (!highlight.global) break;
-                        }
-                        return ranges;
-                    },
-                    string: () => {
-                        const ranges = [], inputLower = input.toLowerCase(), strLower = highlight.toLowerCase();
-                        let idx = 0;
-                        while ((idx = inputLower.indexOf(strLower, idx)) !== -1) {
-                            ranges.push([idx, idx + strLower.length]);
-                            idx += strLower.length;
-                        }
-                        return ranges;
-                    },
-                    range: () => [highlight],
-                    custom: () => {
-                        const ranges = this.getRanges(input, highlight.highlight);
-                        if (highlight.className) {
-                            ranges.forEach(r => r.className = r.className ? `${highlight.className} ${r.className}` : highlight.className);
-                        }
-                        return ranges;
-                    }
-                };
-                return handlers[type]?.() || [];
-            },
-            removeStaggeredRanges(ranges) {
-                const unstaggered = [];
-                ranges.forEach(range => {
-                    const isStaggered = unstaggered.some(ur => {
-                        const startIn = range[0] > ur[0] && range[0] < ur[1];
-                        const stopIn = range[1] > ur[0] && range[1] < ur[1];
-                        return startIn !== stopIn;
-                    });
-                    if (!isStaggered) unstaggered.push(range);
-                });
-                return unstaggered;
-            },
-            getBoundaries(ranges) {
-                const boundaries = [];
-                ranges.forEach(r => {
-                    boundaries.push({type: 'start', index: r[0], className: r.className});
-                    boundaries.push({type: 'stop', index: r[1]});
-                });
-                boundaries.sort((a, b) => {
-                    if (a.index !== b.index) return b.index - a.index;
-                    if (a.type === 'stop' && b.type === 'start') return 1;
-                    if (a.type === 'start' && b.type === 'stop') return -1;
-                    return 0;
-                });
-                return boundaries;
-            },
-            renderMarks(boundaries) {
-                let input = this.$el.val();
-                boundaries.forEach((b, i) => {
-                    const markup = b.type === 'start' ? `{{hwt-mark-start|${i}}}` : '{{hwt-mark-stop}}';
-                    input = input.slice(0, b.index) + markup + input.slice(b.index);
-                });
-                input = input.replace(/\n(\{\{hwt-mark-stop}})?$/, '\n\n$1').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                if (this.browser === 'ie') input = input.replace(/ /g, ' <wbr>');
-                input = input
-                    .replace(/\{\{hwt-mark-start\|(\d+)}}/g, (_, idx) => {
-                        const cn = boundaries[+idx].className;
-                        return cn ? `<mark class="${cn}">` : '<mark>';
-                    })
-                    .replace(/\{\{hwt-mark-stop}}/g, '</mark>');
-                this.$highlights.html(input);
-            },
-            handleScroll() {
-                this.$backdrop.scrollTop(this.$el.scrollTop());
-                const scrollLeft = this.$el.scrollLeft();
-                this.$backdrop.css('transform', scrollLeft > 0 ? `translateX(${-scrollLeft}px)` : '');
-            },
-            blockContainerScroll() {
-                this.$container.scrollLeft(0);
-            },
-            destroy() {
-                const id = this.id;
-                this.$backdrop.remove();
-                this.$el.unwrap().removeClass(`${id}-text ${id}-input`).off(id).removeData(id);
-            }
-        },
-
         popup: {
+            defaults: {
+                alertTitle: 'Notice',
+                confirmTitle: 'Confirm action',
+                confirmLabel: 'Confirm',
+                cancelLabel: 'Cancel',
+                closeLabel: 'Close'
+            },
+            _escape(value) {
+                return $('<div>').text(value == null ? '' : String(value)).html();
+            },
+            _normalizeAction(action, index) {
+                if (typeof action === 'string') {
+                    action = {label: action};
+                }
+
+                action = wps.parse_args({
+                    key: index === 0 ? 'confirm' : 'action_' + index,
+                    label: index === 0 ? this._label('confirmLabel') : 'Action',
+                    className: '',
+                    style: 'secondary',
+                    close: true,
+                    autofocus: false,
+                    callback: null
+                }, action || {});
+
+                action.key = String(action.key || ('action_' + index));
+                action.label = String(action.label || action.key);
+
+                return action;
+            },
+            _renderActions(actions) {
+                actions = (Array.isArray(actions) ? actions : []).map((action, index) => this._normalizeAction(action, index));
+
+                if (!actions.length) {
+                    actions.push(this._normalizeAction({
+                        key: 'close',
+                        label: this._label('closeLabel'),
+                        style: 'primary',
+                        autofocus: true
+                    }, 0));
+                }
+
+                return actions.map((action) => {
+                    const classes = [
+                        'wps-popup-action',
+                        'wps-popup-action--' + action.style,
+                        action.className
+                    ].filter(Boolean).join(' ');
+
+                    return `<button type="button" class="${this._escape(classes)}" data-wps-popup-action="${this._escape(action.key)}"${action.autofocus ? ' autofocus' : ''}>${this._escape(action.label)}</button>`;
+                }).join('');
+            },
+            _messageBody(message) {
+                return `<p class="wps-popup-message">${this._escape(message).replace(/\n/g, '<br>')}</p>`;
+            },
+            _label(key) {
+                return wps.locale.get('popup_' + key, this.defaults[key]);
+            },
             close(elem, options = {}) {
                 options = wps.parse_args({remove: true, restore: false, beforeClose: null}, options);
                 wps.maybe_exec(options.beforeClose, null, elem);
@@ -508,6 +201,134 @@
                     $('body').removeClass('sw-notScrollable');
                 });
             },
+            open(options = {}) {
+                const popup = this;
+                options = wps.parse_args({
+                    title: false, body: false, restore: true, parseElement: false,
+                    beforeAppend: null, afterAppend: null, beforeClose: null, afterClose: null,
+                    size: 'small', message: false, remove: true, actions: []
+                }, options);
+
+                if (options.message && !options.body) {
+                    options.body = popup._messageBody(options.message);
+                }
+
+                const actions = (Array.isArray(options.actions) ? options.actions : []).map((action, index) => popup._normalizeAction(action, index));
+                if (actions.length) {
+                    options.bottom = `<div class="wps-popup-actions">${popup._renderActions(actions)}</div>`;
+                }
+
+                let resolver = null;
+                const promise = new Promise((resolve) => {
+                    resolver = resolve;
+                });
+
+                const previousAfterAppend = options.afterAppend;
+                options.afterAppend = function (current_modal) {
+                    const $modal = $(current_modal);
+
+                    if (previousAfterAppend) {
+                        wps.maybe_exec(previousAfterAppend, current_modal, this);
+                    }
+
+                    if (actions.length) {
+                        $modal.on('click', '[data-wps-popup-action]', function (event) {
+                            const key = $(this).data('wps-popup-action');
+                            const action = actions.find((item) => item.key === key) || actions[0];
+                            let result = true;
+
+                            if (action.callback) {
+                                result = wps.maybe_exec(action.callback, {
+                                    action,
+                                    key,
+                                    modal: $modal,
+                                    event
+                                }, this);
+                            }
+
+                            if (result === false) {
+                                return;
+                            }
+
+                            resolver({key, action, modal: $modal});
+
+                            if (action.close !== false) {
+                                popup.close($modal, {
+                                    restore: $modal.data('wpsRestoreContainer') || false,
+                                    remove: options.remove,
+                                    beforeClose: {callback: options.beforeClose, args: $modal}
+                                });
+                            }
+                        });
+                    }
+                };
+
+                const modalId = popup.render(options);
+
+                return {
+                    id: modalId,
+                    promise,
+                    close: () => popup.close($('#' + modalId), {remove: options.remove})
+                };
+            },
+            alert(message, options = {}) {
+                const closeLabel = options.closeLabel || this._label('closeLabel');
+                options = wps.parse_args({
+                    title: this._label('alertTitle'),
+                    actions: [{key: 'ok', label: closeLabel, style: 'primary', autofocus: true}]
+                }, options, {message});
+
+                return this.open(options).promise;
+            },
+            confirm(message, options = {}) {
+                const confirmLabel = options.confirmLabel || this._label('confirmLabel');
+                const cancelLabel = options.cancelLabel || this._label('cancelLabel');
+                const isDanger = !!options.danger;
+
+                options = wps.parse_args({
+                    title: this._label('confirmTitle'),
+                    actions: [
+                        {key: 'cancel', label: cancelLabel, style: 'secondary'},
+                        {key: 'confirm', label: confirmLabel, style: isDanger ? 'danger' : 'primary', autofocus: true}
+                    ]
+                }, options, {message});
+
+                return this.open(options).promise.then((result) => result && result.key === 'confirm');
+            },
+            create(options = {}) {
+                const popup = this;
+                const state = wps.parse_args({actions: []}, options);
+
+                return {
+                    title(title) {
+                        state.title = title;
+                        return this;
+                    },
+                    body(body) {
+                        state.body = body;
+                        return this;
+                    },
+                    message(message) {
+                        state.message = message;
+                        return this;
+                    },
+                    size(size) {
+                        state.size = size;
+                        return this;
+                    },
+                    action(action) {
+                        state.actions.push(action);
+                        return this;
+                    },
+                    actions(actions) {
+                        state.actions = Array.isArray(actions) ? actions : [];
+                        return this;
+                    },
+                    open() {
+                        return popup.open(state);
+                    }
+                };
+            },
             render(options) {
                 options = wps.parse_args({
                     title: false, body: false, restore: true, parseElement: false,
@@ -515,8 +336,7 @@
                     size: 'small', message: false, remove: true
                 }, options);
                 if (options.message) {
-                    alert(options.message);
-                    return;
+                    options.body = this._messageBody(options.message);
                 }
 
                 const modal_id = 'swModal' + wps.getUID();
@@ -534,6 +354,8 @@
                     bodyContent = wps.maybe_exec(options.body, null, this);
                 }
 
+                options._restoreContainer = restoreContainer;
+
                 let modal_form = `<section class="wps-modalWrapper">
                     <section id="${modal_id}" class="wps-modal wps-modal--${options.size}" style="display: none">
                         <span class="wps-modal__close" role="button">&times;</span>
@@ -546,6 +368,7 @@
 
                 $('body').append(modal_form).addClass('sw-notScrollable');
                 const current_modal = $('#' + modal_id);
+                current_modal.data('wpsRestoreContainer', restoreContainer);
                 if (detached) current_modal.find('.wps-modal__content').append(detached);
                 current_modal.fadeIn(300);
                 if (options.afterAppend) wps.maybe_exec(options.afterAppend, current_modal, this);
@@ -569,26 +392,7 @@
             </svg>`
     };
 
-    wps.clipboard = {
-        write(value = window.location.href) {
-            if (navigator.clipboard?.writeText) {
-                navigator.clipboard.writeText(value).catch(() => this._legacyWrite(value));
-            } else {
-                this._legacyWrite(value);
-            }
-        },
-        _legacyWrite(value) {
-            const input = document.createElement('input');
-            document.body.appendChild(input);
-            input.value = value;
-            input.select();
-            document.execCommand('copy');
-            document.body.removeChild(input);
-        },
-        read: () => navigator.clipboard?.readText() ?? Promise.reject('Clipboard API not available')
-    };
-
-    if (typeof noGlobal === "undefined") window.wps = wps;
+    window.wps = wps;
     return wps;
 
 })(jQuery, typeof window !== "undefined" ? window : this);
@@ -596,11 +400,17 @@
 // Document ready
 (function ($) {
     let $window, $body, media_uploader;
-    let wpoptAutosaveNonce = null;
+    let wpsAutosaveNonce = null;
 
-    function wpoptStatusText(key, fallback) {
-        return wps.locale.get(key, fallback);
-    }
+    wps.currentAdminContext = function () {
+        const body = document.body;
+
+        if (body?.classList.contains("wpopt-admin-screen")) return "wpopt";
+        if (body?.classList.contains("wpfs-admin-screen")) return "wpfs";
+        if (body?.classList.contains("wpmc-admin-screen")) return "wpmc";
+
+        return "";
+    };
 
     function ensureWpoptToastHost() {
         let $host = $("#wpopt-toast-host");
@@ -637,19 +447,319 @@
         }, 1800);
     }
 
-    function initWpoptAutosaveForm(form) {
+    wps.showToast = showWpoptToast;
+
+    function saveFeedbackKey() {
+        const context = wps.currentAdminContext();
+        return context ? "wps-save-feedback:" + context : "";
+    }
+
+    function currentFeedbackRoute() {
+        const params = new URLSearchParams(window.location.search);
+
+        return [
+            params.get("page") || "",
+            params.get("wps-page") || "",
+            window.location.pathname
+        ].join("|");
+    }
+
+    function noticeState($notice) {
+        if ($notice.hasClass("notice-error") || $notice.hasClass("error") || $notice.find(".error").length) return "error";
+        if ($notice.hasClass("notice-warning") || $notice.hasClass("update-nag") || $notice.find(".warning").length) return "warning";
+        if ($notice.hasClass("notice-info")) return "info";
+
+        return "success";
+    }
+
+    function clearPendingSaveFeedback() {
+        const key = saveFeedbackKey();
+        if (!key) return;
+
+        try {
+            window.sessionStorage.removeItem(key);
+        } catch (e) {
+        }
+    }
+
+    function rememberPendingSaveFeedback(form) {
+        const key = saveFeedbackKey();
+        if (!key) return;
+
+        const $form = $(form);
+        const method = String($form.attr("method") || "get").toLowerCase();
+        const isSettingsForm = String($form.attr("action") || "").includes("options.php")
+            || $form.find("input[name='option_panel'], .wps-submit, input[type='submit'].button-primary, button[type='submit'].button-primary").length > 0;
+
+        if (method !== "post") return;
+        if (!isSettingsForm) return;
+        if (!$form.closest(".wps-admin-app, .wps-wrap, .wps-core-settings-page").length) return;
+
+        try {
+            window.sessionStorage.setItem(key, JSON.stringify({
+                route: currentFeedbackRoute(),
+                time: Date.now()
+            }));
+        } catch (e) {
+        }
+    }
+
+    function showPendingSaveFeedbackFallback() {
+        const key = saveFeedbackKey();
+        if (!key) return;
+
+        let pending = null;
+
+        try {
+            pending = JSON.parse(window.sessionStorage.getItem(key) || "null");
+            window.sessionStorage.removeItem(key);
+        } catch (e) {
+            return;
+        }
+
+        if (!pending || pending.route !== currentFeedbackRoute()) return;
+        if (Date.now() - Number(pending.time || 0) > 120000) return;
+
+        showWpoptToast("success", wps.locale.get("saved", "Settings Saved"));
+    }
+
+    function showNoticeElementAsToast(element) {
+        const $notice = $(element);
+        const text = ($notice.find("p").first().text() || $notice.text()).trim();
+
+        if (!text) return false;
+        if ($notice.data("wps-toast-shown")) return false;
+
+        $notice.data("wps-toast-shown", true);
+        showWpoptToast(noticeState($notice), text);
+
+        if ($notice.is("#wps-ajax-message, #message")) {
+            $notice.empty();
+            $notice.removeData("wps-toast-shown");
+        } else {
+            $notice.remove();
+        }
+
+        return true;
+    }
+
+    function initServerNoticeToasts() {
+        if (!$body?.hasClass("wps-admin-screen")) return false;
+
+        let shown = false;
+        const $notices = $("#wpbody-content > .notice, #wpbody-content > .updated, #wpbody-content > .error, #wpbody-content > .settings-error")
+            .not(".inline, .hidden");
+
+        $notices.each(function () {
+            shown = showNoticeElementAsToast(this) || shown;
+        });
+
+        const params = new URLSearchParams(window.location.search);
+
+        if (params.get("settings-updated") === "true" && !shown) {
+            showWpoptToast("success", wps.locale.get("saved", "Settings Saved"));
+            shown = true;
+        }
+
+        if (shown) {
+            clearPendingSaveFeedback();
+        }
+
+        return shown;
+    }
+
+    function initDynamicNoticeToasts() {
+        if (!$body?.hasClass("wps-admin-screen") || !window.MutationObserver) return;
+
+        const target = document.getElementById("wpbody-content");
+        if (!target) return;
+
+        const noticeSelector = ".notice, .updated, .error, .settings-error, #wps-ajax-message.wps-notice, #message.wps-notice";
+        const observer = new MutationObserver(function (mutations) {
+            mutations.forEach(function (mutation) {
+                $(mutation.addedNodes).each(function () {
+                    if (this.nodeType !== 1) return;
+
+                    const $node = $(this);
+                    if ($node.is(noticeSelector)) {
+                        showNoticeElementAsToast(this);
+                    }
+
+                    $node.find(noticeSelector).each(function () {
+                        showNoticeElementAsToast(this);
+                    });
+                });
+
+                if (mutation.type === "characterData" && mutation.target.parentElement) {
+                    const notice = mutation.target.parentElement.closest(noticeSelector);
+                    if (notice) {
+                        showNoticeElementAsToast(notice);
+                    }
+                }
+            });
+        });
+
+        observer.observe(target, {
+            childList: true,
+            subtree: true,
+            characterData: true
+        });
+    }
+
+    function wpsCurrentRoute() {
+        return new URLSearchParams(window.location.search).get("wps-page") || "dashboard";
+    }
+
+    function wpsNavIconHref(icon, context) {
+        const href = $(`.wps-app-${context} .wps-app-nav-icon use, .wps-app-${context} .wps-app-logo-icon use`)
+            .first()
+            .attr("href") || "";
+
+        if (!href) return "";
+
+        return href.replace(/#wps-icon-[^#]+$/, "#wps-icon-" + String(icon || "tools"));
+    }
+
+    function wpsBuildNavIcon(icon, context) {
+        const href = wpsNavIconHref(icon, context);
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("class", "wps-svg-icon wps-app-nav-icon");
+        svg.setAttribute("aria-hidden", "true");
+        svg.setAttribute("focusable", "false");
+
+        if (href) {
+            const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+            use.setAttribute("href", href);
+            svg.appendChild(use);
+        }
+
+        return svg;
+    }
+
+    function wpsBuildNavSection(section, context) {
+        const fragment = document.createDocumentFragment();
+        const label = document.createElement("span");
+        const activeRoute = wpsCurrentRoute();
+
+        label.className = "wps-app-nav-section";
+        label.dataset.wpsNavKind = section.kind || "";
+        label.textContent = section.label || "";
+        fragment.appendChild(label);
+
+        (section.items || []).forEach(function (item) {
+            const link = document.createElement("a");
+            const text = document.createElement("span");
+
+            link.className = "wps-app-nav-item";
+            link.href = item.url || "#";
+            link.dataset.wpsNavKind = section.kind || "";
+            link.dataset.wpsNavId = item.id || "";
+
+            if (item.id === activeRoute) {
+                link.classList.add("is-active");
+            }
+
+            text.textContent = item.label || item.id || "";
+            link.appendChild(wpsBuildNavIcon(item.icon, context));
+            link.appendChild(text);
+            fragment.appendChild(link);
+        });
+
+        return fragment;
+    }
+
+    function wpsNavItemRoute(element) {
+        try {
+            return new URL($(element).attr("href") || "", window.location.href).searchParams.get("wps-page") || "";
+        } catch (e) {
+            return "";
+        }
+    }
+
+    function wpsNavSectionKind(elements) {
+        let kind = "";
+
+        elements.each(function () {
+            if (!$(this).hasClass("wps-app-nav-item")) return;
+
+            const route = wpsNavItemRoute(this);
+            if (route.indexOf("module-setting-") === 0) {
+                kind = "settings";
+                return false;
+            }
+
+            if (route.indexOf("module-") === 0) {
+                kind = "tools";
+                return false;
+            }
+        });
+
+        return kind;
+    }
+
+    function wpsCollectNavSections($nav) {
+        const sections = [];
+        let current = null;
+
+        $nav.children().each(function () {
+            const $node = $(this);
+
+            if ($node.hasClass("wps-app-nav-section")) {
+                current = $();
+                sections.push(current);
+            }
+
+            if (current) {
+                current = current.add(this);
+                sections[sections.length - 1] = current;
+            }
+        });
+
+        return sections;
+    }
+
+    function wpsRefreshDynamicNav(navUpdate, context) {
+        if (!navUpdate || !Array.isArray(navUpdate.sections)) return;
+
+        context = context || wps.currentAdminContext();
+
+        const $nav = $(`.wps-app-${context} .wps-app-nav`).first();
+        if (!$nav.length) return;
+
+        wpsCollectNavSections($nav).forEach(function ($section) {
+            const kind = wpsNavSectionKind($section);
+
+            if (kind === "settings" || kind === "tools") {
+                $section.remove();
+            }
+        });
+
+        const fragment = document.createDocumentFragment();
+        navUpdate.sections.forEach(function (section) {
+            if (section && Array.isArray(section.items) && section.items.length) {
+                fragment.appendChild(wpsBuildNavSection(section, context));
+            }
+        });
+
+        $nav.append(fragment);
+    }
+
+    wps.refreshDynamicNav = wpsRefreshDynamicNav;
+
+    function initWpsAutosaveForm(form) {
         const $form = $(form);
 
-        if (!wpoptAutosaveNonce) return;
-        if ($form.data("wpopt-autosave-init")) return;
+        if (!wpsAutosaveNonce) return;
+        if ($form.data("wps-autosave-init")) return;
         if ($form.closest(".wpfs-core-settings-page, .wpfs-breadcrumbs-page, .wpfs-settings-page").length) return;
 
-        $form.data("wpopt-autosave-init", true);
+        $form.data("wps-autosave-init", true);
 
         let lastSaved = $form.serialize();
         let timer = null;
         let inFlight = false;
         let queued = false;
+        const isModulesHandlerForm = $form.find("input[name='option_panel'][value='settings-modules_handler']").length > 0;
 
         const $submit = $form.find(".wps-submit");
         $submit.find("input[type='submit'], button[type='submit'], .button-primary").remove();
@@ -671,16 +781,19 @@
             wps.ajaxHandler({
                 mod: "settings",
                 mod_action: "autosave_settings",
-                mod_nonce: wpoptAutosaveNonce,
+                mod_nonce: wpsAutosaveNonce,
                 mod_form: snapshot,
                 callback(data, state) {
                     inFlight = false;
 
                     if (state === "success") {
                         lastSaved = snapshot;
-                        showWpoptToast("success", data?.text || wpoptStatusText("autosaved", "All changes saved"));
+                        if (data?.module === "modules_handler") {
+                            wpsRefreshDynamicNav(data.nav_update);
+                        }
+                        showWpoptToast("success", data?.text || wps.locale.get("autosaved", "All changes saved"));
                     } else {
-                        showWpoptToast("error", data?.text || wpoptStatusText("autosave_failed", "Autosave failed"));
+                        showWpoptToast("error", data?.text || wps.locale.get("autosave_failed", "Autosave failed"));
                     }
 
                     if (queued) {
@@ -696,10 +809,123 @@
             timer = setTimeout(doSave, 700);
         };
 
-        $form.on("change input", ":input:not([type='submit']):not([type='button']):not([type='hidden'])", debounceSave);
+        const scheduleSave = function (event) {
+            if (isModulesHandlerForm && event.type === "change") {
+                clearTimeout(timer);
+                doSave();
+                return;
+            }
+
+            debounceSave();
+        };
+
+        $form.on("change input", ":input:not([type='submit']):not([type='button']):not([type='hidden'])", scheduleSave);
         $form.on("submit", function (e) {
             e.preventDefault();
             doSave();
+        });
+    }
+
+    function initWpsModuleReset() {
+        $(document).on("click", "[data-wps-module-reset], [data-wpopt-module-reset]", function (event) {
+            event.preventDefault();
+
+            if (!wpsAutosaveNonce) return;
+
+            const $button = $(this);
+            const moduleSlug = String($button.data("wps-module-reset") || $button.data("wpopt-module-reset") || "");
+            const moduleName = String($button.data("module-name") || moduleSlug);
+
+            if (!moduleSlug || $button.prop("disabled")) return;
+
+            const message = wps.locale.get(
+                "wps_reset_module_confirm",
+                "Reset %s to factory settings? Current module settings will be overwritten and the cleanup pipeline will run."
+            ).replace("%s", moduleName);
+
+            wps.ui.popup.confirm(message, {danger: true}).then(function (confirmed) {
+                if (!confirmed) return;
+
+                $button.prop("disabled", true).addClass("is-running");
+
+                wps.ajaxHandler({
+                    mod: "settings",
+                    mod_action: "reset_module",
+                    mod_nonce: wpsAutosaveNonce,
+                    mod_args: {module: moduleSlug},
+                    callback(data, state) {
+                        $button.prop("disabled", false).removeClass("is-running");
+
+                        const success = state === "success";
+                        showWpoptToast(
+                            success ? "success" : "error",
+                            data?.text || wps.locale.get(success ? "wps_reset_module_success" : "wps_reset_module_failed", success ? "Module reset completed." : "Module reset failed.")
+                        );
+                    }
+                });
+            });
+        });
+    }
+
+    function resumeConfirmedElement(element) {
+        const $element = $(element);
+        const form = element.form || $element.closest('form').get(0);
+
+        $element.data('wps-confirmed', true);
+
+        if (form && /^(submit|image)$/i.test(element.type || '')) {
+            if (typeof form.requestSubmit === 'function') {
+                form.requestSubmit(element);
+            } else {
+                const name = $element.attr('name');
+                let hidden = null;
+
+                if (name) {
+                    hidden = $('<input>', {
+                        type: 'hidden',
+                        name,
+                        value: $element.val()
+                    }).appendTo(form);
+                }
+
+                form.submit();
+                if (hidden) hidden.remove();
+            }
+            return;
+        }
+
+        if (element.tagName === 'A' && element.href) {
+            window.location.href = element.href;
+            return;
+        }
+
+        element.click();
+    }
+
+    function initConfirmableActions() {
+        $(document).on('click', '[data-wps-confirm]', function (event) {
+            const $element = $(this);
+            const message = $element.data('wps-confirm');
+
+            if (!message || $element.data('wps-confirmed')) {
+                $element.removeData('wps-confirmed');
+                return;
+            }
+
+            event.preventDefault();
+            event.stopImmediatePropagation();
+
+            wps.ui.popup.confirm(message, {
+                title: $element.data('wps-confirm-title') || wps.ui.popup._label('confirmTitle'),
+                actions: [
+                    {key: 'cancel', label: $element.data('wps-cancel-label') || wps.ui.popup._label('cancelLabel'), style: 'secondary'},
+                    {key: 'confirm', label: $element.data('wps-confirm-label') || wps.ui.popup._label('confirmLabel'), style: ($element.data('wps-confirm-danger') !== undefined || $element.hasClass('is-danger') || $element.hasClass('button-link-delete')) ? 'danger' : 'primary', autofocus: true}
+                ]
+            }).then(function (confirmed) {
+                if (confirmed) {
+                    resumeConfirmedElement($element.get(0));
+                }
+            });
         });
     }
 
@@ -743,10 +969,115 @@
         });
     }
 
+    function padTimePart(value) {
+        return String(value).padStart(2, '0');
+    }
+
+    function normalizeTimeValue(value) {
+        const parts = String(value || '').split(':');
+        const hours = Number.parseInt(parts[0], 10);
+        const minutes = Number.parseInt(parts[1], 10);
+
+        return {
+            hours: Number.isFinite(hours) ? Math.min(Math.max(hours, 0), 23) : 0,
+            minutes: Number.isFinite(minutes) ? Math.min(Math.max(minutes, 0), 59) : 0,
+        };
+    }
+
+    function formatTimeInput(input) {
+        if (!input || input.disabled || input.readOnly || input.value === '') return;
+
+        const current = normalizeTimeValue(input.value);
+        input.value = `${padTimePart(current.hours)}:${padTimePart(current.minutes)}`;
+    }
+
+    function triggerFieldChange(input) {
+        $(input).trigger('input').trigger('change');
+    }
+
+    function stepTimeInput(input, direction) {
+        if (!input || input.disabled || input.readOnly) return;
+
+        const step = Math.max(Number.parseInt(input.getAttribute('step') || '900', 10), 900);
+        const deltaMinutes = Math.max(Math.round(step / 60), 1) * direction;
+        const current = normalizeTimeValue(input.value);
+        const dayMinutes = 24 * 60;
+        let nextMinutes = (current.hours * 60) + current.minutes + deltaMinutes;
+
+        nextMinutes = ((nextMinutes % dayMinutes) + dayMinutes) % dayMinutes;
+        input.value = `${padTimePart(Math.floor(nextMinutes / 60))}:${padTimePart(nextMinutes % 60)}`;
+        triggerFieldChange(input);
+    }
+
+    function decimalPlaces(value) {
+        const text = String(value);
+
+        if (text.includes('e-')) {
+            return Number.parseInt(text.split('e-')[1], 10) || 0;
+        }
+
+        return text.includes('.') ? text.split('.')[1].length : 0;
+    }
+
+    function stepNumberInput(input, direction) {
+        if (!input || input.disabled || input.readOnly) return;
+
+        const step = Number.parseFloat(input.getAttribute('step') || '1') || 1;
+        const min = Number.parseFloat(input.getAttribute('min'));
+        const max = Number.parseFloat(input.getAttribute('max'));
+        const current = Number.parseFloat(input.value);
+        const precision = decimalPlaces(step);
+        let next = (Number.isFinite(current) ? current : 0) + (step * direction);
+
+        if (Number.isFinite(min)) next = Math.max(min, next);
+        if (Number.isFinite(max)) next = Math.min(max, next);
+
+        input.value = precision > 0 ? next.toFixed(precision) : String(Math.round(next));
+        triggerFieldChange(input);
+    }
+
+    function handleStepperButtonClick(e) {
+        e.preventDefault();
+
+        const isTimeStepper = this.classList.contains('wps-time-stepper-btn');
+        const direction = Number.parseInt(
+            this.getAttribute(isTimeStepper ? 'data-wps-time-step' : 'data-wps-number-step') || '0',
+            10
+        );
+        const $button = $(this);
+        const input = $button.siblings(isTimeStepper ? '.wps-time-stepper-input' : 'input[type="number"]').get(0);
+
+        if (isTimeStepper) {
+            stepTimeInput(input, direction);
+            return;
+        }
+
+        stepNumberInput(input, direction);
+    }
+
+    function setWpsAppNavOpen($app, open) {
+        if (!$app || !$app.length) return;
+
+        $app.toggleClass('is-nav-open', open);
+        $app.find('> .wps-app-main .wps-app-menu-toggle').attr('aria-expanded', open ? 'true' : 'false');
+        $app.find('> .wps-app-sidebar .wps-app-menu-close').attr('aria-expanded', open ? 'true' : 'false');
+
+        if ($body) {
+            $body.toggleClass('wps-app-nav-open', $('.wps-admin-app.is-nav-open').length > 0);
+        }
+    }
+
     $(function () {
         $window = $(window);
         $body = $('body');
-        wpoptAutosaveNonce = wps.locale.get("wpopt_ajax_nonce", "");
+        const adminContext = wps.currentAdminContext();
+        wpsAutosaveNonce = adminContext ? wps.locale.get(adminContext + "_ajax_nonce", "") : "";
+        const hadServerNoticeToast = initServerNoticeToasts();
+        if (!hadServerNoticeToast) {
+            showPendingSaveFeedbackFallback();
+        }
+        initDynamicNoticeToasts();
+        initConfirmableActions();
 
         // Event delegation
         $body.on('click', '.wps-uploader__init', function (e) {
@@ -768,7 +1099,7 @@
                 $this.children('.wps-collapse-icon').toggleClass('wps-collapse-icon-close');
                 $this.next().toggle(300);
             })
-            .on('click', '.wps-dropdown__opener', function (e) {
+            .on('click', '.wps-dropdown .wps-input__wrapper', function (e) {
                 e.preventDefault();
                 const $dropdown = $(this).closest('.wps-dropdown');
                 $dropdown.find('.wps-multiselect__wrapper').slideToggle();
@@ -827,9 +1158,44 @@
                     }
                 });
             })
+            .on('submit', '.wps-admin-app form, .wps-wrap form, .wps-core-settings-page form', function () {
+                rememberPendingSaveFeedback(this);
+            })
+            .on('click', '.wps-app-menu-toggle', function (e) {
+                e.preventDefault();
+                setWpsAppNavOpen($(this).closest('.wps-admin-app'), true);
+            })
+            .on('click', '.wps-app-menu-close', function (e) {
+                e.preventDefault();
+                setWpsAppNavOpen($(this).closest('.wps-admin-app'), false);
+            })
+            .on('click', '.wps-admin-app.is-nav-open .wps-app-nav-item', function () {
+                if (window.matchMedia('(max-width: 960px)').matches) {
+                    setWpsAppNavOpen($(this).closest('.wps-admin-app'), false);
+                }
+            })
+            .on('keydown', function (e) {
+                if (e.key === 'Escape') {
+                    $('.wps-admin-app.is-nav-open').each(function () {
+                        setWpsAppNavOpen($(this), false);
+                    });
+                }
+            })
             .on('click change', '.wps-apple-switch', function () {
                 handleDependent($(this), this.checked);
+            })
+            .on('click', '.wps-time-stepper-btn, .wps-number-stepper-btn', handleStepperButtonClick)
+            .on('blur', '.wps-time-stepper-input', function () {
+                formatTimeInput(this);
             });
+
+        $window.on('resize', function () {
+            if (!window.matchMedia('(max-width: 960px)').matches) {
+                $('.wps-admin-app.is-nav-open').each(function () {
+                    setWpsAppNavOpen($(this), false);
+                });
+            }
+        });
 
         // Circle charts
         $('.wps-progressbarCircle').each(function () {
@@ -842,38 +1208,71 @@
             ));
         });
 
+        $('.wps-admin-app').each(function (appIndex) {
+            const $app = $(this);
+            const $tabsbar = $app.find('> .wps-app-main > .wps-app-tabsbar').first();
+            if (!$tabsbar.length) return;
+
+            const $tabs = $app.find('> .wps-app-main > .wps-app-content .wps-ar-tabs').filter(function () {
+                return $(this).closest('.wps-ar-tabcontent').length === 0;
+            }).first();
+
+            if (!$tabs.length) return;
+
+            const $tabList = $tabs.children('.wps-ar-tablist').first();
+            if (!$tabList.length || $tabList.closest('.wps-app-tabsbar').length) return;
+
+            const tabsId = $tabs.attr('data-wps-tabs-id') || `wps-tabs-${appIndex}`;
+            $tabs.attr('data-wps-tabs-id', tabsId).addClass('wps-ar-tabs-has-external-list');
+            $tabList.attr('data-wps-tabs-owner', tabsId);
+            $tabsbar.empty().append($tabList).removeAttr('hidden');
+        });
+
         // Tabs
         $('.wps-ar-tabs').each(function () {
             const $tab = $(this);
-            const $tabLinks = $tab.find('li[aria-controls]');
+            const tabsId = $tab.attr('data-wps-tabs-id');
+            const $externalTabList = tabsId
+                ? $tab.closest('.wps-admin-app').find('.wps-app-tabsbar .wps-ar-tablist').filter(function () {
+                    return $(this).attr('data-wps-tabs-owner') === tabsId;
+                }).first()
+                : $();
+            const $tabList = $externalTabList.length ? $externalTabList : $tab.children('.wps-ar-tablist').first();
+            const $tabLinks = $tabList.find('li[aria-controls]');
             const $tabContents = $tab.find('.wps-ar-tabcontent');
             const hash = window.location.hash.substring(1);
             let hasSelected = false;
 
             $tabContents.each(function () {
                 const $this = $(this), id = $this.attr('id');
-                if (hash === id && $this.attr('aria-disabled') !== 'true') {
+                const $link = $tabLinks.filter(`[aria-controls="${id}"]`).first();
+                if (hash === id && $this.attr('aria-disabled') !== 'true' && $link.attr('aria-disabled') !== 'true') {
                     hasSelected = true;
-                    $tabLinks.filter(`[aria-controls="${id}"]`).attr('aria-selected', 'true');
+                    $link.attr('aria-selected', 'true');
                     $this.attr({'aria-hidden': 'false', 'aria-selected': 'true'});
                 } else {
-                    $this.attr('aria-hidden', 'true');
+                    $this.attr({'aria-hidden': 'true', 'aria-selected': 'false'});
                 }
             });
 
             if (!hasSelected) {
-                const $first = $tab.find('li[aria-controls]:not([aria-disabled="true"]):first');
-                $first.attr('aria-selected', 'true');
-                $tabContents.filter('#' + $first.attr('aria-controls')).attr('aria-hidden', 'false');
+                const $first = $tabLinks.filter(':not([aria-disabled="true"])').first();
+                const firstTarget = $first.attr('aria-controls');
+                if (firstTarget) {
+                    $tabLinks.attr('aria-selected', 'false');
+                    $tabContents.attr({'aria-hidden': 'true', 'aria-selected': 'false'});
+                    $first.attr('aria-selected', 'true');
+                    $tabContents.filter('#' + firstTarget).attr({'aria-hidden': 'false', 'aria-selected': 'true'});
+                }
             }
 
-            $tab.find('ul').on('click', 'li[aria-controls]:not([aria-disabled="true"])', function (e) {
+            $tabList.on('click', 'li[aria-controls]:not([aria-disabled="true"])', function (e) {
                 e.preventDefault();
                 const $this = $(this), targetId = $this.attr('aria-controls');
                 $tabLinks.attr('aria-selected', 'false');
-                $tabContents.attr('aria-hidden', 'true');
+                $tabContents.attr({'aria-hidden': 'true', 'aria-selected': 'false'});
                 $this.attr('aria-selected', 'true');
-                $('#' + targetId).attr('aria-hidden', 'false');
+                $('#' + targetId).attr({'aria-hidden': 'false', 'aria-selected': 'true'});
                 history.pushState(null, null, location.pathname + location.search + '#' + targetId);
                 animateTabPanel(targetId);
             });
@@ -883,9 +1282,10 @@
             animateTabPanel(window.location.hash.substring(1));
         }
 
-        $(".wps-ar-tabcontent form[action='options.php']").each(function () {
-            initWpoptAutosaveForm(this);
+        $(".wps-core-settings-page form[action='options.php'], .wps-ar-tabcontent form[action='options.php'], #wps-options[action='options.php']").each(function () {
+            initWpsAutosaveForm(this);
         });
+        initWpsModuleReset();
 
         // Init switches
         $('.wps-apple-switch').each(function () {

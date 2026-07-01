@@ -217,11 +217,8 @@ class Graphic
                 $o_inner .= "<row class='wps-row-title{$notice_class}' $dataValues>{$separator_icon}<h3><strong>{$args['name']}</strong>$label_icon</h3>$label</row>";
                 break;
 
-            case "time":
             case 'hidden':
             case "text":
-            case "numeric":
-            case "number":
             case "range":
             case "submit":
 
@@ -231,10 +228,14 @@ class Graphic
                 $input_type = $args['type'] === 'range' ? 'range' : $args['type'];
 
                 if ($args['type'] === 'range') {
+                    $show_range_value = empty($args['props']['data-wps-hide-range-value']);
+                    unset($args['props']['data-wps-hide-range-value']);
                     $args['props']['min'] = $args['props']['min'] ?? '1';
                     $args['props']['max'] = $args['props']['max'] ?? '10';
                     $args['props']['step'] = $args['props']['step'] ?? '1';
-                    $args['props']['oninput'] = trim(($args['props']['oninput'] ?? '') . " this.closest('.wps-range-field').querySelector('.wps-range-value').textContent=this.value;");
+                    if ($show_range_value) {
+                        $args['props']['oninput'] = trim(($args['props']['oninput'] ?? '') . " this.closest('.wps-range-field').querySelector('.wps-range-value').textContent=this.value;");
+                    }
                     $o_inner .= "<div class='wps-range-field'>";
                 }
 
@@ -256,9 +257,73 @@ class Graphic
                 );
 
                 if ($args['type'] === 'range') {
-                    $o_inner .= "<span class='wps-range-value'>" . esc_html((string)$args['value']) . "</span>";
+                    if ($show_range_value) {
+                        $o_inner .= "<span class='wps-range-value'>" . esc_html((string)$args['value']) . "</span>";
+                    }
                     $o_inner .= "</div>";
                 }
+                break;
+
+            case "numeric":
+            case "number":
+
+                $args['classes'][] = 'wps';
+                $args['classes'][] = "wps-{$args['type']}";
+                $args['classes'][] = 'wps-number-stepper-input';
+                $args['props']['step'] = $args['props']['step'] ?? '1';
+
+                $o_inner .= "<div class='wps-number-stepper'>";
+                $o_inner .= "<button class='wps-number-stepper-btn' type='button' data-wps-number-step='-1' aria-label='Decrease value'>-</button>";
+                $o_inner .= self::buildField(
+                    "input",
+                    array_merge(
+                        [
+                            'class'        => self::parse_classes($args['classes']),
+                            'autocomplete' => 'off',
+                            'type'         => 'number',
+                            'name'         => $args['input_name'],
+                            'id'           => $args['id'],
+                            'placeholder'  => $args['placeholder'],
+                            'spellcheck'   => 'false',
+                            'value'        => esc_attr((string)$args['value']),
+                        ],
+                        $args['props']
+                    )
+                );
+                $o_inner .= "<button class='wps-number-stepper-btn' type='button' data-wps-number-step='1' aria-label='Increase value'>+</button>";
+                $o_inner .= "</div>";
+                break;
+
+            case "time":
+
+                $args['classes'][] = 'wps';
+                $args['classes'][] = 'wps-time';
+                $args['classes'][] = 'wps-time-stepper-input';
+                $args['props']['step'] = $args['props']['step'] ?? '900';
+
+                $o_inner .= "<div class='wps-time-stepper'>";
+                $o_inner .= "<button class='wps-time-stepper-btn' type='button' data-wps-time-step='-1' aria-label='Decrease time'>-</button>";
+                $o_inner .= self::buildField(
+                    "input",
+                    array_merge(
+                        [
+                            'class'        => self::parse_classes($args['classes']),
+                            'autocomplete' => 'off',
+                            'type'         => 'text',
+                            'inputmode'    => 'numeric',
+                            'pattern'      => '[0-9]{2}:[0-9]{2}',
+                            'maxlength'    => '5',
+                            'name'         => $args['input_name'],
+                            'id'           => $args['id'],
+                            'placeholder'  => $args['placeholder'] ?: '00:00',
+                            'spellcheck'   => 'false',
+                            'value'        => esc_attr((string)$args['value']),
+                        ],
+                        $args['props']
+                    )
+                );
+                $o_inner .= "<button class='wps-time-stepper-btn' type='button' data-wps-time-step='1' aria-label='Increase time'>+</button>";
+                $o_inner .= "</div>";
                 break;
 
             case 'button':
@@ -344,6 +409,30 @@ class Graphic
                         $args['props']
                     ),
                     $args['value']
+                );
+                break;
+
+            case "conf":
+
+                $conf_value = is_array($args['value']) ? $args['value'] : array('href' => (string)$args['value']);
+                $conf_href = (string)($conf_value['href'] ?? '#');
+                $conf_text = (string)($conf_value['text'] ?? __('Configure'));
+
+                $args['classes'][] = 'button';
+                $args['classes'][] = 'button-secondary';
+                $args['classes'][] = 'wps-conf-button';
+
+                $o_inner .= self::buildField(
+                    'a',
+                    array_merge(
+                        [
+                            'class' => self::parse_classes($args['classes']),
+                            'href'  => esc_url($conf_href),
+                            'id'    => $args['id'],
+                        ],
+                        $args['props']
+                    ),
+                    $conf_text
                 );
                 break;
 
@@ -511,6 +600,10 @@ class Graphic
 
         if ($type === 'link') {
             return 'external';
+        }
+
+        if ($type === 'conf') {
+            return 'settings';
         }
 
         if ($type === 'dropdown') {
@@ -732,6 +825,109 @@ class Graphic
         return ob_get_clean();
     }
 
+    public static function render_admin_app(array $args): void
+    {
+        $args = array_merge([
+            'title'       => '',
+            'page_title'  => '',
+            'version'     => '',
+            'context'     => '',
+            'active'      => 'dashboard',
+            'breadcrumb'  => '',
+            'status'      => '',
+            'status_type' => 'is-healthy',
+            'nav'         => [],
+            'content'     => '',
+            'brand_icon'  => 'zap',
+            'brand_logo'  => '',
+            'help'        => '',
+        ], $args);
+
+        $title = esc_html((string)$args['title']);
+        $version = esc_html((string)$args['version']);
+        $active = sanitize_key((string)$args['active']);
+        $context = sanitize_html_class((string)$args['context']);
+        $breadcrumb = $args['breadcrumb'] ?: $title;
+        $page_title = (string)($args['page_title'] ?: $breadcrumb);
+        $brand_logo = esc_url((string)$args['brand_logo']);
+        ?>
+        <section class="wps-app wps-admin-app <?php echo esc_attr($context ? "wps-app-$context" : ''); ?>">
+            <aside class="wps-app-sidebar">
+                <header class="wps-app-brand">
+                    <span class="wps-app-logo <?php echo $brand_logo !== '' ? 'has-image' : ''; ?>">
+                        <?php if ($brand_logo !== '') : ?>
+                            <img class="wps-app-logo-image" src="<?php echo $brand_logo; ?>" alt="" aria-hidden="true">
+                        <?php else : ?>
+                            <?php echo self::icon((string)$args['brand_icon'], 'wps-app-logo-icon'); ?>
+                        <?php endif; ?>
+                    </span>
+                    <span>
+                        <strong><?php echo $title; ?></strong>
+                        <?php if ($version !== '') : ?><small><?php echo $version; ?></small><?php endif; ?>
+                    </span>
+                    <button class="wps-app-menu-close" type="button" aria-expanded="true">
+                        <span class="screen-reader-text"><?php esc_html_e('Close menu', 'wps'); ?></span>
+                        <span aria-hidden="true"></span>
+                        <span aria-hidden="true"></span>
+                    </button>
+                </header>
+                <nav class="wps-app-nav" aria-label="<?php echo esc_attr($title); ?>">
+                    <?php foreach ((array)$args['nav'] as $section) : ?>
+                        <?php if (!empty($section['label'])) : ?>
+                            <span class="wps-app-nav-section"><?php echo esc_html((string)$section['label']); ?></span>
+                        <?php endif; ?>
+                        <?php foreach ((array)($section['items'] ?? []) as $item) :
+                            $id = sanitize_key((string)($item['id'] ?? ''));
+                            $classes = ['wps-app-nav-item'];
+                            if ($id === $active) {
+                                $classes[] = 'is-active';
+                            }
+                            ?>
+                            <a class="<?php echo esc_attr(implode(' ', $classes)); ?>" href="<?php echo esc_url((string)($item['url'] ?? '#')); ?>">
+                                <?php echo self::icon((string)($item['icon'] ?? 'settings'), 'wps-app-nav-icon'); ?>
+                                <span><?php echo esc_html((string)($item['label'] ?? $id)); ?></span>
+                            </a>
+                        <?php endforeach; ?>
+                    <?php endforeach; ?>
+                </nav>
+                <?php if (!empty($args['help'])) : ?>
+                    <div class="wps-app-help"><?php echo $args['help']; ?></div>
+                <?php endif; ?>
+            </aside>
+            <main class="wps-app-main">
+                <header class="wps-app-topbar">
+                    <div class="wps-app-breadcrumb">
+                        <span><?php echo $title; ?></span>
+                        <i aria-hidden="true"></i>
+                        <b><?php echo esc_html((string)$breadcrumb); ?></b>
+                    </div>
+                    <h1 class="wps-app-page-title"><?php echo esc_html($page_title); ?></h1>
+                    <?php if (!empty($args['status'])) : ?>
+                        <span class="wps-app-status <?php echo esc_attr(sanitize_html_class((string)$args['status_type'])); ?>"><?php echo esc_html((string)$args['status']); ?></span>
+                    <?php endif; ?>
+                    <button class="wps-app-menu-toggle" type="button" aria-expanded="false">
+                        <span class="screen-reader-text"><?php esc_html_e('Open menu', 'wps'); ?></span>
+                        <span aria-hidden="true"></span>
+                        <span aria-hidden="true"></span>
+                        <span aria-hidden="true"></span>
+                    </button>
+                </header>
+                <section class="wps-app-tabsbar" data-wps-app-tabsbar hidden></section>
+                <section class="wps-app-content">
+                    <?php
+                    if (is_callable($args['content'])) {
+                        call_user_func($args['content']);
+                    }
+                    else {
+                        echo $args['content'];
+                    }
+                    ?>
+                </section>
+            </main>
+        </section>
+        <?php
+    }
+
     private static function generatePanelContent($field): string
     {
         if (!is_array($field)) {
@@ -739,19 +935,6 @@ class Graphic
         }
 
         $HTML = '';
-
-        if (!empty($field['panel-title'])) {
-            $panel_icon = !empty($field['panel-icon']) ? self::icon($field['panel-icon'], 'wps-panel-icon') : '';
-            $panel_description = !empty($field['panel-description']) ? "<p>{$field['panel-description']}</p>" : '';
-            $panel_status = $field['panel-status'] ?? '';
-
-            if ($panel_icon || $panel_description || $panel_status) {
-                $HTML .= "<div class='wps-panel-head'>{$panel_icon}<div class='wps-panel-title'><h2>{$field['panel-title']}</h2>{$panel_description}</div>{$panel_status}</div>";
-            }
-            else {
-                $HTML .= "<h2>{$field['panel-title']}</h2>";
-            }
-        }
 
         if (isset($field['callback'])) {
             $args = $field['args'] ?? array();
@@ -779,6 +962,10 @@ class Graphic
 
     public static function is_on_screen($slug): bool
     {
-        return isset($_GET['page']) and str_contains($_GET['page'], trim($slug));
+        $slug = trim((string)$slug);
+        $page = isset($_GET['page']) ? sanitize_text_field(wp_unslash($_GET['page'])) : '';
+        $route = isset($_GET['wps-page']) ? sanitize_text_field(wp_unslash($_GET['wps-page'])) : '';
+
+        return ($page and str_contains($page, $slug)) || ($route and str_contains($route, $slug));
     }
 }
