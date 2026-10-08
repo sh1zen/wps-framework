@@ -93,7 +93,8 @@
                 },
                 complete(jqXHR) {
                     if (typeof options.callback === "function") {
-                        const res = wps.json.parse(jqXHR.responseText) || jqXHR.responseText;
+                        const parsed = wps.json.parse(jqXHR.responseText);
+                        const res = wps.isObject(parsed) ? parsed : {status: 'error', data: {}};
                         setTimeout(() => options.callback(res.data, res.status), 100);
                     }
                     if (options.use_loading) options.use_loading.removeClass("wps-loader");
@@ -412,12 +413,12 @@
         return "";
     };
 
-    function ensureWpoptToastHost() {
-        let $host = $("#wpopt-toast-host");
+    function ensureToastHost() {
+        let $host = $("#wps-toast-host");
         if ($host.length) return $host;
 
         $host = $("<div/>", {
-            id: "wpopt-toast-host",
+            id: "wps-toast-host",
             "aria-live": "polite",
             "aria-atomic": "true"
         });
@@ -426,28 +427,53 @@
         return $host;
     }
 
-    function showWpoptToast(state, text) {
-        const $host = ensureWpoptToastHost();
+    // All action and save feedback shares one host, appearance and lifetime.
+    function showToast(state, text, options = {}) {
+        const $host = ensureToastHost();
         const $toast = $("<div/>", {
-            "class": "wpopt-toast is-" + state,
-            text: text
+            "class": "wps-toast is-" + state,
+            role: state === "error" || state === "warning" ? "alert" : "status"
         });
+        const $content = $('<div/>', {'class': 'wps-toast-content'}).appendTo($toast);
+        $('<span/>', {text: text}).appendTo($content);
+        let visibleTimer, dismissTimer, removeTimer;
+        const dismiss = function () {
+            window.clearTimeout(visibleTimer);
+            window.clearTimeout(dismissTimer);
+            window.clearTimeout(removeTimer);
+            $toast.remove();
+        };
 
         $host.append($toast);
 
-        window.setTimeout(function () {
+        if (typeof options.retry === 'function') {
+            $('<button/>', {
+                type: 'button',
+                'class': 'wps-toast-action',
+                text: wps.locale.get('autosave_retry', 'Retry save')
+            }).on('click', options.retry).appendTo($content);
+        }
+        $('<button/>', {
+            type: 'button',
+            'class': 'wps-toast-dismiss',
+            'aria-label': wps.locale.get('popup_closeLabel', 'Close'),
+            text: '×'
+        }).on('click', dismiss).appendTo($toast);
+
+        visibleTimer = window.setTimeout(function () {
             $toast.addClass("is-visible");
         }, 10);
 
-        window.setTimeout(function () {
-            $toast.removeClass("is-visible");
-            window.setTimeout(function () {
-                $toast.remove();
-            }, 220);
-        }, 1800);
+        if (!options.persistent && state !== "error" && state !== "warning") {
+            dismissTimer = window.setTimeout(function () {
+                $toast.removeClass("is-visible");
+                removeTimer = window.setTimeout(dismiss, 220);
+            }, 1800);
+        }
+        return {element: $toast, dismiss: dismiss};
     }
 
-    wps.showToast = showWpoptToast;
+    wps.showToast = showToast;
 
     function saveFeedbackKey() {
         const context = wps.currentAdminContext();
@@ -465,9 +491,9 @@
     }
 
     function noticeState($notice) {
-        if ($notice.hasClass("notice-error") || $notice.hasClass("error") || $notice.find(".error").length) return "error";
-        if ($notice.hasClass("notice-warning") || $notice.hasClass("update-nag") || $notice.find(".warning").length) return "warning";
-        if ($notice.hasClass("notice-info")) return "info";
+        if ($notice.is(".notice-error, .error, .wps-notice--error") || $notice.find(".error").length) return "error";
+        if ($notice.is(".notice-warning, .warning, .update-nag, .wps-notice--warning") || $notice.find(".warning").length) return "warning";
+        if ($notice.is(".notice-info, .info") || $notice.find(".info").length) return "info";
 
         return "success";
     }
@@ -520,18 +546,25 @@
         if (!pending || pending.route !== currentFeedbackRoute()) return;
         if (Date.now() - Number(pending.time || 0) > 120000) return;
 
-        showWpoptToast("success", wps.locale.get("saved", "Settings Saved"));
+        showToast("warning", wps.locale.get("save_unconfirmed", "Settings submitted. Save could not be confirmed."));
     }
 
     function showNoticeElementAsToast(element) {
         const $notice = $(element);
-        const text = ($notice.find("p").first().text() || $notice.text()).trim();
-
-        if (!text) return false;
+        if (!element.isConnected || $notice.is('.inline, .hidden')) return false;
         if ($notice.data("wps-toast-shown")) return false;
 
+        const $messages = $notice.find('p');
+        const messages = ($messages.length ? $messages : $notice).map(function () {
+            return {
+                state: noticeState($notice.is('#wps-ajax-message, #message') ? $(this) : $notice),
+                text: $(this).clone().find('.notice-dismiss').remove().end().text().trim()
+            };
+        }).get().filter(function (message) { return message.text; });
+        if (!messages.length) return false;
+
         $notice.data("wps-toast-shown", true);
-        showWpoptToast(noticeState($notice), text);
+        messages.forEach(function (message) { showToast(message.state, message.text); });
 
         if ($notice.is("#wps-ajax-message, #message")) {
             $notice.empty();
@@ -543,12 +576,17 @@
         return true;
     }
 
-    function initServerNoticeToasts() {
-        if (!$body?.hasClass("wps-admin-screen")) return false;
+    // Only transient sources are converted; inline guidance stays in its panel.
+    function transientNoticeSelector() {
+        const sources = '.wps-admin-notice, #wps-ajax-message.wps-notice, #message.wps-notice, [data-wps-notices] .notice, [data-wps-notices] .settings-error';
+        return $body?.hasClass('wps-admin-screen')
+            ? sources + ', #wpbody-content > .notice, #wpbody-content > .updated, #wpbody-content > .error, #wpbody-content > .settings-error'
+            : sources;
+    }
 
+    function initServerNoticeToasts() {
         let shown = false;
-        const $notices = $("#wpbody-content > .notice, #wpbody-content > .updated, #wpbody-content > .error, #wpbody-content > .settings-error")
-            .not(".inline, .hidden");
+        const $notices = $(transientNoticeSelector());
 
         $notices.each(function () {
             shown = showNoticeElementAsToast(this) || shown;
@@ -556,8 +594,8 @@
 
         const params = new URLSearchParams(window.location.search);
 
-        if (params.get("settings-updated") === "true" && !shown) {
-            showWpoptToast("success", wps.locale.get("saved", "Settings Saved"));
+        if ($body?.hasClass('wps-admin-screen') && params.get("settings-updated") === "true" && !shown) {
+            showToast("success", wps.locale.get("saved", "Settings Saved"));
             shown = true;
         }
 
@@ -569,34 +607,31 @@
     }
 
     function initDynamicNoticeToasts() {
-        if (!$body?.hasClass("wps-admin-screen") || !window.MutationObserver) return;
+        if (!window.MutationObserver) return;
 
         const target = document.getElementById("wpbody-content");
         if (!target) return;
 
-        const noticeSelector = ".notice, .updated, .error, .settings-error, #wps-ajax-message.wps-notice, #message.wps-notice";
+        const noticeSelector = transientNoticeSelector();
         const observer = new MutationObserver(function (mutations) {
+            const notices = new Set();
             mutations.forEach(function (mutation) {
+                const parent = mutation.target.nodeType === 1 ? mutation.target : mutation.target.parentElement;
+                $(parent).closest(noticeSelector).each(function () { notices.add(this); });
                 $(mutation.addedNodes).each(function () {
                     if (this.nodeType !== 1) return;
 
                     const $node = $(this);
                     if ($node.is(noticeSelector)) {
-                        showNoticeElementAsToast(this);
+                        notices.add(this);
                     }
 
                     $node.find(noticeSelector).each(function () {
-                        showNoticeElementAsToast(this);
+                        notices.add(this);
                     });
                 });
-
-                if (mutation.type === "characterData" && mutation.target.parentElement) {
-                    const notice = mutation.target.parentElement.closest(noticeSelector);
-                    if (notice) {
-                        showNoticeElementAsToast(notice);
-                    }
-                }
             });
+            notices.forEach(showNoticeElementAsToast);
         });
 
         observer.observe(target, {
@@ -657,6 +692,7 @@
 
             if (item.id === activeRoute) {
                 link.classList.add("is-active");
+                link.setAttribute("aria-current", "page");
             }
 
             text.textContent = item.label || item.id || "";
@@ -746,6 +782,28 @@
 
     wps.refreshDynamicNav = wpsRefreshDynamicNav;
 
+    // Consumers keep their save endpoint and update one transient toast per form.
+    wps.createSaveFeedback = function (form, retrySave) {
+        let toast = null;
+        let currentState = 'idle';
+        let currentText = '';
+        return function (state, text) {
+            if (state === currentState && text === currentText && toast?.element.get(0).isConnected) return;
+            if (toast) toast.dismiss();
+            const wasIdle = currentState === 'idle';
+            currentState = state;
+            currentText = text;
+            toast = null;
+            if (state === 'idle' || (wasIdle && state === 'saved')) return;
+
+            toast = showToast(state === 'saved' ? 'success' : state === 'error' ? 'error' : 'info', text, {
+                persistent: state !== 'saved',
+                retry: state === 'error' ? retrySave : null
+            });
+            toast.element.attr('data-save-state', state);
+        };
+    };
+
     function initWpsAutosaveForm(form) {
         const $form = $(form);
 
@@ -767,16 +825,28 @@
             $submit.hide();
         }
 
+        const setSaveState = wps.createSaveFeedback(form, function () {
+            clearTimeout(timer);
+            doSave();
+        });
+        $form.data('wps-has-unsaved-changes', function () {
+            return inFlight || $form.serialize() !== lastSaved;
+        });
+
         const doSave = function () {
             const snapshot = $form.serialize();
 
-            if (snapshot === lastSaved) return;
             if (inFlight) {
                 queued = true;
                 return;
             }
+            if (snapshot === lastSaved) {
+                setSaveState('saved', wps.locale.get('autosave_saved', 'All changes saved'));
+                return;
+            }
 
             inFlight = true;
+            setSaveState('saving', wps.locale.get('autosave_saving', 'Saving changes…'));
 
             wps.ajaxHandler({
                 mod: "settings",
@@ -791,9 +861,11 @@
                         if (data?.module === "modules_handler") {
                             wpsRefreshDynamicNav(data.nav_update);
                         }
-                        showWpoptToast("success", data?.text || wps.locale.get("autosaved", "All changes saved"));
+                        setSaveState($form.serialize() === lastSaved ? 'saved' : 'pending',
+                            wps.locale.get($form.serialize() === lastSaved ? 'autosave_saved' : 'autosave_pending',
+                                $form.serialize() === lastSaved ? 'All changes saved' : 'Unsaved changes'));
                     } else {
-                        showWpoptToast("error", data?.text || wps.locale.get("autosave_failed", "Autosave failed"));
+                        setSaveState('error', data?.text || wps.locale.get("autosave_failed", "Changes could not be saved. Please retry."));
                     }
 
                     if (queued) {
@@ -810,6 +882,7 @@
         };
 
         const scheduleSave = function (event) {
+            setSaveState('pending', wps.locale.get('autosave_pending', 'Unsaved changes'));
             if (isModulesHandlerForm && event.type === "change") {
                 clearTimeout(timer);
                 doSave();
@@ -822,6 +895,7 @@
         $form.on("change input", ":input:not([type='submit']):not([type='button']):not([type='hidden'])", scheduleSave);
         $form.on("submit", function (e) {
             e.preventDefault();
+            clearTimeout(timer);
             doSave();
         });
     }
@@ -857,7 +931,7 @@
                         $button.prop("disabled", false).removeClass("is-running");
 
                         const success = state === "success";
-                        showWpoptToast(
+                        showToast(
                             success ? "success" : "error",
                             data?.text || wps.locale.get(success ? "wps_reset_module_success" : "wps_reset_module_failed", success ? "Module reset completed." : "Module reset failed.")
                         );
@@ -1067,9 +1141,137 @@
         }
     }
 
+    function positionWpsDropdownList($dropdown) {
+        if (!$dropdown || !$dropdown.length || !$dropdown.hasClass('is-open')) return;
+
+        const trigger = $dropdown.find('.wps-input__wrapper').get(0);
+        const list = $dropdown.data('wps-dropdown-list');
+
+        if (!trigger || !list || !list.length) return;
+
+        const rect = trigger.getBoundingClientRect();
+        const gap = 6;
+        const viewportPadding = 12;
+        const availableBelow = window.innerHeight - rect.bottom - gap - viewportPadding;
+        const availableAbove = rect.top - gap - viewportPadding;
+        const preferredHeight = 240;
+        const openAbove = availableBelow < 120 && availableAbove > availableBelow;
+        const maxHeight = Math.max(120, Math.min(preferredHeight, openAbove ? availableAbove : availableBelow));
+        const width = Math.min(rect.width, window.innerWidth - (viewportPadding * 2));
+        const left = Math.min(
+            Math.max(viewportPadding, rect.left),
+            window.innerWidth - viewportPadding - width
+        );
+        const top = openAbove
+            ? Math.max(viewportPadding, rect.top - maxHeight - gap)
+            : Math.min(window.innerHeight - viewportPadding - maxHeight, rect.bottom + gap);
+
+        list.css({
+            position: 'fixed',
+            top: `${Math.max(viewportPadding, top)}px`,
+            left: `${left}px`,
+            width: `${width}px`,
+            maxHeight: `${maxHeight}px`
+        });
+    }
+
+    function closeWpsDropdown($dropdown) {
+        if (!$dropdown || !$dropdown.length) return;
+
+        const list = $dropdown.data('wps-dropdown-list') || $dropdown.find('.wps-multiselect__wrapper');
+
+        if (list && list.length) {
+            list.hide()
+                .removeClass('wps-dropdown-portal')
+                .removeAttr('style')
+                .appendTo($dropdown)
+                .removeData('wps-dropdown-owner');
+        }
+
+        $dropdown.removeClass('is-open').removeData('wps-dropdown-list');
+    }
+
+    function closeOpenWpsDropdowns(except) {
+        $('.wps-dropdown.is-open').each(function () {
+            const $dropdown = $(this);
+
+            if (except && $dropdown.is(except)) {
+                return;
+            }
+
+            closeWpsDropdown($dropdown);
+        });
+    }
+
+    function openWpsDropdown($dropdown) {
+        closeOpenWpsDropdowns($dropdown);
+
+        const list = $dropdown.children('.wps-multiselect__wrapper');
+
+        if (!list.length) return;
+
+        $dropdown.addClass('is-open').data('wps-dropdown-list', list);
+
+        list
+            .data('wps-dropdown-owner', $dropdown)
+            .addClass('wps-dropdown-portal')
+            .appendTo($body)
+            .show();
+
+        positionWpsDropdownList($dropdown);
+    }
+
+    const externalizeWpsAppTabs = function (scope = document) {
+        const $scope = $(scope);
+        let $apps = $scope.filter('.wps-admin-app').add($scope.find('.wps-admin-app'));
+
+        if (!$apps.length && scope.nodeType === 1) {
+            $apps = $scope.closest('.wps-admin-app');
+        }
+
+        $apps.each(function (appIndex) {
+            const $app = $(this);
+            const $tabsbar = $app.find('> .wps-app-main > .wps-app-tabsbar').first();
+            if (!$tabsbar.length) return;
+
+            const $tabs = $app.find('> .wps-app-main > .wps-app-content .wps-ar-tabs').filter(function () {
+                return $(this).closest('.wps-ar-tabcontent').length === 0;
+            }).first();
+
+            if (!$tabs.length) return;
+
+            const $tabList = $tabs.children('.wps-ar-tablist').first();
+            if (!$tabList.length || $tabList.closest('.wps-app-tabsbar').length) return;
+
+            const tabsId = $tabs.attr('data-wps-tabs-id') || `wps-tabs-${appIndex}`;
+            $tabs.attr('data-wps-tabs-id', tabsId).addClass('wps-ar-tabs-has-external-list');
+            $tabList.attr('data-wps-tabs-owner', tabsId);
+            $tabsbar.empty().append($tabList).removeAttr('hidden');
+        });
+    };
+
+    // The script loads in the document head. Observe parser mutations so app
+    // tabs reach their final toolbar before the first paint, avoiding a jump
+    // from the content panel when the DOM-ready handlers run.
+    let appTabsObserver = null;
+
+    if (window.MutationObserver && document.documentElement) {
+        appTabsObserver = new window.MutationObserver(function () {
+            externalizeWpsAppTabs(document);
+        });
+        appTabsObserver.observe(document.documentElement, {childList: true, subtree: true});
+    }
+
+    externalizeWpsAppTabs(document);
+
     $(function () {
         $window = $(window);
         $body = $('body');
+        if (appTabsObserver) {
+            appTabsObserver.disconnect();
+            appTabsObserver = null;
+        }
+        externalizeWpsAppTabs(document);
         const adminContext = wps.currentAdminContext();
         wpsAutosaveNonce = adminContext ? wps.locale.get(adminContext + "_ajax_nonce", "") : "";
         const hadServerNoticeToast = initServerNoticeToasts();
@@ -1101,22 +1303,37 @@
             })
             .on('click', '.wps-dropdown .wps-input__wrapper', function (e) {
                 e.preventDefault();
-                const $dropdown = $(this).closest('.wps-dropdown');
-                $dropdown.find('.wps-multiselect__wrapper').slideToggle();
-                $dropdown.toggleClass('is-open');
-            })
-            .on('click', '.wps-dropdown.is-open li', function (e) {
                 e.stopPropagation();
                 const $dropdown = $(this).closest('.wps-dropdown');
+
+                if ($dropdown.hasClass('is-open')) {
+                    closeWpsDropdown($dropdown);
+                    return;
+                }
+
+                openWpsDropdown($dropdown);
+            })
+            .on('click', '.wps-dropdown.is-open li, .wps-dropdown-portal li', function (e) {
+                e.stopPropagation();
+                const $list = $(this).closest('.wps-multiselect__wrapper');
+                const $dropdown = $list.data('wps-dropdown-owner') || $(this).closest('.wps-dropdown');
                 const input = $dropdown.find('input');
+
                 input.val($(this).data('value'));
                 $dropdown.find(`[data-input="${input.attr('id')}"]`).text($(this).text());
-                $dropdown.find('.wps-multiselect__wrapper').slideToggle();
-                $dropdown.toggleClass('is-open');
+                triggerFieldChange(input.get(0));
+                closeWpsDropdown($dropdown);
+            })
+            .on('click', function (e) {
+                const $target = $(e.target);
+
+                if (!$target.closest('.wps-dropdown, .wps-dropdown-portal').length) {
+                    closeOpenWpsDropdowns();
+                }
             })
             .on('click', 'icon.wps-option-info-icon', function () {
                 const $icon = $(this);
-                const $info = $icon.closest('row').find('label.wps-option-info');
+                const $info = $icon.closest('row').find('.wps-option-info');
                 const wasVisible = $info.is(":visible");
 
                 $info.slideToggle(160, function () {
@@ -1176,6 +1393,7 @@
             })
             .on('keydown', function (e) {
                 if (e.key === 'Escape') {
+                    closeOpenWpsDropdowns();
                     $('.wps-admin-app.is-nav-open').each(function () {
                         setWpsAppNavOpen($(this), false);
                     });
@@ -1190,12 +1408,22 @@
             });
 
         $window.on('resize', function () {
+            $('.wps-dropdown.is-open').each(function () {
+                positionWpsDropdownList($(this));
+            });
+
             if (!window.matchMedia('(max-width: 960px)').matches) {
                 $('.wps-admin-app.is-nav-open').each(function () {
                     setWpsAppNavOpen($(this), false);
                 });
             }
         });
+
+        document.addEventListener('scroll', function () {
+            $('.wps-dropdown.is-open').each(function () {
+                positionWpsDropdownList($(this));
+            });
+        }, true);
 
         // Circle charts
         $('.wps-progressbarCircle').each(function () {
@@ -1206,26 +1434,6 @@
                 $chart.data('size') || 100,
                 $chart.data('stroke') || 1
             ));
-        });
-
-        $('.wps-admin-app').each(function (appIndex) {
-            const $app = $(this);
-            const $tabsbar = $app.find('> .wps-app-main > .wps-app-tabsbar').first();
-            if (!$tabsbar.length) return;
-
-            const $tabs = $app.find('> .wps-app-main > .wps-app-content .wps-ar-tabs').filter(function () {
-                return $(this).closest('.wps-ar-tabcontent').length === 0;
-            }).first();
-
-            if (!$tabs.length) return;
-
-            const $tabList = $tabs.children('.wps-ar-tablist').first();
-            if (!$tabList.length || $tabList.closest('.wps-app-tabsbar').length) return;
-
-            const tabsId = $tabs.attr('data-wps-tabs-id') || `wps-tabs-${appIndex}`;
-            $tabs.attr('data-wps-tabs-id', tabsId).addClass('wps-ar-tabs-has-external-list');
-            $tabList.attr('data-wps-tabs-owner', tabsId);
-            $tabsbar.empty().append($tabList).removeAttr('hidden');
         });
 
         // Tabs
@@ -1248,7 +1456,7 @@
                 const $link = $tabLinks.filter(`[aria-controls="${id}"]`).first();
                 if (hash === id && $this.attr('aria-disabled') !== 'true' && $link.attr('aria-disabled') !== 'true') {
                     hasSelected = true;
-                    $link.attr('aria-selected', 'true');
+                    $link.attr({'aria-selected': 'true', tabindex: '0'});
                     $this.attr({'aria-hidden': 'false', 'aria-selected': 'true'});
                 } else {
                     $this.attr({'aria-hidden': 'true', 'aria-selected': 'false'});
@@ -1259,9 +1467,9 @@
                 const $first = $tabLinks.filter(':not([aria-disabled="true"])').first();
                 const firstTarget = $first.attr('aria-controls');
                 if (firstTarget) {
-                    $tabLinks.attr('aria-selected', 'false');
+                    $tabLinks.attr({'aria-selected': 'false', tabindex: '-1'});
                     $tabContents.attr({'aria-hidden': 'true', 'aria-selected': 'false'});
-                    $first.attr('aria-selected', 'true');
+                    $first.attr({'aria-selected': 'true', tabindex: '0'});
                     $tabContents.filter('#' + firstTarget).attr({'aria-hidden': 'false', 'aria-selected': 'true'});
                 }
             }
@@ -1269,12 +1477,25 @@
             $tabList.on('click', 'li[aria-controls]:not([aria-disabled="true"])', function (e) {
                 e.preventDefault();
                 const $this = $(this), targetId = $this.attr('aria-controls');
-                $tabLinks.attr('aria-selected', 'false');
+                $tabLinks.attr({'aria-selected': 'false', tabindex: '-1'});
                 $tabContents.attr({'aria-hidden': 'true', 'aria-selected': 'false'});
-                $this.attr('aria-selected', 'true');
-                $('#' + targetId).attr({'aria-hidden': 'false', 'aria-selected': 'true'});
+                $this.attr({'aria-selected': 'true', tabindex: '0'});
+                $tabContents.filter(function () { return this.id === targetId; }).attr({'aria-hidden': 'false', 'aria-selected': 'true'});
                 history.pushState(null, null, location.pathname + location.search + '#' + targetId);
                 animateTabPanel(targetId);
+            });
+            $tabList.on('keydown', '[role="tab"]', function (e) {
+                const $enabled = $tabLinks.filter(':not([aria-disabled="true"])');
+                const index = $enabled.index(this);
+                let next;
+                if (e.key === 'ArrowRight') next = (index + 1) % $enabled.length;
+                else if (e.key === 'ArrowLeft') next = (index - 1 + $enabled.length) % $enabled.length;
+                else if (e.key === 'Home') next = 0;
+                else if (e.key === 'End') next = $enabled.length - 1;
+                else if (e.key === 'Enter' || e.key === ' ') next = index;
+                else return;
+                e.preventDefault();
+                $enabled.eq(next).trigger('click').trigger('focus');
             });
         });
 
@@ -1294,7 +1515,11 @@
 
         // Beforeunload warning
         $window.on('beforeunload', function (e) {
-            if ($body?.hasClass('wps-doingAction')) {
+            const hasUnsavedChanges = $('form').toArray().some(function (form) {
+                const check = $(form).data('wps-has-unsaved-changes');
+                return typeof check === 'function' && check();
+            });
+            if ($body?.hasClass('wps-doingAction') || hasUnsavedChanges) {
                 const msg = wps.locale.get('text_close_warning');
                 (e || window.event).returnValue = msg;
                 return msg;

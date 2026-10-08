@@ -9,6 +9,8 @@ namespace WPS\core;
 
 class wps_wrapper
 {
+    public ?Services $services = null;
+
     public ?Cache $cache = null;
 
     public ?Storage $storage = null;
@@ -23,7 +25,6 @@ class wps_wrapper
 
     public ?ModuleHandler $moduleHandler = null;
 
-    private string $path = '';
     private array $args = [];
     private string $context;
     private array $components = [];
@@ -36,16 +37,14 @@ class wps_wrapper
 
         $this->filter_args($args);
 
-        $this->path = $this->args['modules_path'];
-
         $this->filter_components($components);
     }
 
     private function filter_args($args): void
     {
         $this->args = array_merge($this->args, [
-            'modules_path' => '',
-            'table_name'   => ''
+            'module_catalog' => null,
+            'table_name'     => ''
         ], (array)$args);
     }
 
@@ -56,6 +55,7 @@ class wps_wrapper
         }
 
         $this->components = array_merge([
+            'services'      => false,
             'cache'         => false,
             'storage'       => false,
             'cron'          => false,
@@ -74,6 +74,13 @@ class wps_wrapper
 
     public function setup(): void
     {
+        if ($this->components['services'] and is_null($this->services)) {
+            $this->services = new Services();
+            $this->services->register('html_output_buffer', static function (): HtmlOutputBuffer {
+                return new HtmlOutputBuffer();
+            });
+        }
+
         if ($this->components['cache'] and is_null($this->cache)) {
             $this->cache = new Cache($this->context, defined('WP_PERSISTENT_CACHE') and WP_PERSISTENT_CACHE);
         }
@@ -90,8 +97,8 @@ class wps_wrapper
             $this->settings = new Settings($this->context);
         }
 
-        if ($this->components['moduleHandler'] and !empty($this->args['modules_path']) and is_null($this->moduleHandler)) {
-            $this->moduleHandler = new ModuleHandler($this->context, $this->args['modules_path']);
+        if ($this->components['moduleHandler'] and is_null($this->moduleHandler)) {
+            $this->moduleHandler = new ModuleHandler($this->context, $this->args['module_catalog']);
         }
 
         if ($this->components['ajax'] and wp_doing_ajax() and is_null($this->ajax)) {
@@ -103,9 +110,29 @@ class wps_wrapper
         }
     }
 
-    public function get_path()
+    public function switch_to_blog(bool $create_options_table = false): void
     {
-        return $this->path;
+        if ($this->components['cache']) {
+            $this->cache = new Cache($this->context, defined('WP_PERSISTENT_CACHE') and WP_PERSISTENT_CACHE);
+        }
+
+        if ($this->components['storage']) {
+            $this->storage = new Storage($this->context);
+        }
+
+        $this->settings = new Settings($this->context);
+
+        if ($this->components['options'] && !empty($this->args['table_name'])) {
+            $this->options = new Options($this->context, $this->args['table_name'], $this->cache, $create_options_table);
+        }
+
+        if ($this->components['moduleHandler']) {
+            $this->moduleHandler = new ModuleHandler($this->context, $this->args['module_catalog']);
+        }
+
+        if ($this->components['cron']) {
+            $this->cron = new CronForModules($this->context);
+        }
     }
 
     public function __get($name)

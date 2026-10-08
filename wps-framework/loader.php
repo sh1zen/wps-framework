@@ -32,10 +32,13 @@ require_once WPS_FRAMEWORK . 'Rewriter.class.php';
 require_once WPS_FRAMEWORK . 'UtilEnv.php';
 require_once WPS_FRAMEWORK . 'Images.php';
 
+require_once WPS_FRAMEWORK . 'Services.class.php';
+require_once WPS_FRAMEWORK . 'HtmlOutputBuffer.class.php';
 require_once WPS_FRAMEWORK . 'Cache.class.php';
 require_once WPS_FRAMEWORK . 'Stack.php';
 require_once WPS_FRAMEWORK . 'Storage.class.php';
 require_once WPS_FRAMEWORK . 'Disk.class.php';
+require_once WPS_FRAMEWORK . 'Debug.class.php';
 require_once WPS_FRAMEWORK . 'Settings.class.php';
 require_once WPS_FRAMEWORK . 'Options.class.php';
 
@@ -49,8 +52,11 @@ require_once WPS_FRAMEWORK . 'PerformanceMeter.class.php';
 require_once WPS_FRAMEWORK . 'Module.class.php';
 require_once WPS_FRAMEWORK . 'ModuleHandler.class.php';
 
+\WPS\core\Debug::initialize();
+
 
 add_action('admin_enqueue_scripts', 'wps_admin_enqueue_scripts', 10, 0);
+add_action('admin_print_styles', 'wps_admin_enqueue_ui', 15, 0);
 
 // make sure to be fired after all modules are loaded to prevent serialize of incomplete php object class
 add_action('init', ['\WPS\core\CronActions', 'Initialize'], 10000);
@@ -112,6 +118,7 @@ function wps_init(): void
             'table_name' => "wps_core",
         ],
         [
+            'services' => true,
             'cache'    => true,
             'options'  => true,
             'settings' => true,

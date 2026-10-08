@@ -42,8 +42,6 @@ class Module
      *
      * default: empty - never loaded
      */
-    public array $scopes = array();
-
     /**
      * Module name without prefix Mod_
      */
@@ -95,7 +93,7 @@ class Module
         // check if this module loads on cron and do a cronjob
         if (wp_doing_cron()) {
 
-            if (in_array('cron', $this->scopes) and wps($this->context)->cron->is_active($this->slug)) {
+            if (wps($this->context)->moduleHandler->module_has_scope($this->slug, 'cron') and wps($this->context)->cron->is_active($this->slug)) {
 
                 add_action("{$this->context}_exec_cron", array($this, 'cron_handler'), 10, 1);
             }
@@ -154,6 +152,7 @@ class Module
     {
     }
 
+    /** Render escaped notice sources for the shared WPS toast controller. */
     public function admin_notices(): void
     {
         if (empty($this->notices)) {
@@ -183,15 +182,11 @@ class Module
             return;
         }
 
-        echo "<div class='wps-admin-notice-host' aria-live='polite' aria-atomic='true'>";
-
         foreach ($rendered_notices as $notice) {
             echo "<div class='notice notice-{$notice['status']} is-dismissible wps-admin-notice'>";
             echo "<p>" . esc_html($notice['message']) . "</p>";
             echo "</div>";
         }
-
-        echo "</div>";
     }
 
     public function cron_validate_settings($input, $filtering = false): array
@@ -606,7 +601,7 @@ class Module
 
     public function has_panel(): bool
     {
-        return in_array('admin-page', $this->scopes);
+        return wps($this->context)->moduleHandler->module_has_scope($this->slug, 'admin-page');
     }
 
     protected function remove_browser_query_args($items = null): void

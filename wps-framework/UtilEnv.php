@@ -9,7 +9,13 @@ namespace WPS\core;
 
 class UtilEnv
 {
-    static $dynamic_time_limit = true;
+    private const DATABASE_TABLES_CACHE_GROUP = 'database-schema';
+
+    private const DATABASE_TABLES_CACHE_TTL = 300;
+
+    private static array $database_tables = [];
+
+    static bool $dynamic_time_limit = true;
 
     public static function handle_upgrade($ver_start, $ver_to, $upgrade_path)
     {
@@ -34,7 +40,8 @@ class UtilEnv
 
             $next_ver = array_shift($upgrades);
 
-            require_once $upgrade_path . "$next_ver.php";
+            // Each Multisite blog owns its schema and must execute the same migration file.
+            require $upgrade_path . "$next_ver.php";
 
             $current_ver = $next_ver;
         }
@@ -90,7 +97,13 @@ class UtilEnv
 
         require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
 
-        return dbDelta($sql);
+        $result = dbDelta($sql);
+        $cache_key = self::database_tables_cache_key();
+
+        unset(self::$database_tables[$cache_key]);
+        wps_core()->cache->delete($cache_key, self::DATABASE_TABLES_CACHE_GROUP);
+
+        return $result;
     }
 
     public static function db_search_replace($search, $replace, $table, $column, $where = [])
@@ -848,6 +861,27 @@ class UtilEnv
     }
 
     /**
+     * Check whether server is OpenLiteSpeed.
+     *
+     * OpenLiteSpeed identifies itself with a more specific server signature, but
+     * remains part of the LiteSpeed family for backwards-compatible checks.
+     */
+    public static function is_openlitespeed(): bool
+    {
+        $server_type = defined('LITESPEED_SERVER_TYPE') ? strtoupper((string)LITESPEED_SERVER_TYPE) : '';
+        if (in_array($server_type, array('OLS', 'LITESPEED_SERVER_OLS'), true)) {
+            return true;
+        }
+
+        $edition = $_SERVER['LSWS_EDITION'] ?? getenv('LSWS_EDITION');
+        if (is_string($edition) and stristr($edition, 'OpenLiteSpeed') !== false) {
+            return true;
+        }
+
+        return isset($_SERVER['SERVER_SOFTWARE']) and stristr($_SERVER['SERVER_SOFTWARE'], 'OpenLiteSpeed') !== false;
+    }
+
+    /**
      * Returns true if server is nginx
      */
     public static function is_nginx(): bool
@@ -955,16 +989,43 @@ class UtilEnv
     public static function table_exist(string $table_name): bool
     {
         global $wpdb;
-        static $tables = [];
 
         if (empty($table_name)) {
             return false;
         }
 
-        if (empty($tables)) {
-            $tables = array_flip($wpdb->get_col("SHOW TABLES"));
+        $cache_key = self::database_tables_cache_key();
+
+        if (!isset(self::$database_tables[$cache_key])) {
+            $tables = wps_core()->cache->get($cache_key, self::DATABASE_TABLES_CACHE_GROUP, null);
+
+            if (!is_array($tables)) {
+                $tables = array_fill_keys($wpdb->get_col("SHOW TABLES"), true);
+
+                wps_core()->cache->set(
+                    $cache_key,
+                    $tables,
+                    self::DATABASE_TABLES_CACHE_GROUP,
+                    true,
+                    self::DATABASE_TABLES_CACHE_TTL
+                );
+            }
+
+            self::$database_tables[$cache_key] = $tables;
         }
 
-        return isset($tables[$table_name]);
+        return isset(self::$database_tables[$cache_key][$table_name]);
     }
+
+    private static function database_tables_cache_key(): string
+    {
+        global $wpdb;
+
+        return Cache::generate_key(
+            'database-tables',
+            defined('DB_NAME') ? DB_NAME : '',
+            $wpdb->prefix
+        );
+    }
+
 }

@@ -96,7 +96,7 @@ class CronActions
         }
 
         if (empty($hook) or !(is_closure($callback) or is_callable($callback))) {
-            wps_log("CronAction:: invalid callback for $hook", 'wps-cron.log');
+            wps_log("CronAction:: invalid callback for $hook", 'cron', 'error');
             return false;
         }
 
@@ -113,7 +113,7 @@ class CronActions
         }
 
         if (!$timestamp) {
-            wps_log("CronAction:: invalid timestamp for $hook", 'wps-cron.log');
+            wps_log("CronAction:: invalid timestamp for $hook", 'cron', 'error');
             return false;
         }
 
@@ -171,8 +171,8 @@ class CronActions
 
     private function get_event_key(): string
     {
-        // shorthand for empty array()
-        return empty($this->args) ? '40cd750bba9870f18aada2478b24840a' : Cache::generate_key($this->args);
+        // Expand the arguments so the cache helper hashes WordPress's args array.
+        return Cache::generate_key(...$this->args);
     }
 
     private function build_event(): array
@@ -313,7 +313,7 @@ class CronActions
     {
         $crons = _get_cron_array();
 
-        $key = Cache::generate_key($args);
+        $key = Cache::generate_key(...$args);
 
         if (!$timestamp) {
             $timestamp = time();

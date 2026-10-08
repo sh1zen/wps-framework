@@ -10,9 +10,11 @@ use WPS\core\UtilEnv;
 function wps_admin_enqueue_scripts(): void
 {
     $style_asset = UtilEnv::resolve_asset(dirname(__DIR__), 'assets/css/style.css');
+    $toast_asset = UtilEnv::resolve_asset(dirname(__DIR__), 'assets/css/toast.css');
     $script_asset = UtilEnv::resolve_asset(dirname(__DIR__), 'assets/js/core.js');
 
-    wp_register_style('vendor-wps-css', $style_asset['url'], [], wps_core()->debug ? time() : ($style_asset['version'] ?: WPS_VERSION));
+    wp_register_style('vendor-wps-toast-css', $toast_asset['url'], [], wps_core()->debug ? time() : ($toast_asset['version'] ?: WPS_VERSION));
+    wp_register_style('vendor-wps-css', $style_asset['url'], ['vendor-wps-toast-css'], wps_core()->debug ? time() : ($style_asset['version'] ?: WPS_VERSION));
     wp_register_script('vendor-wps-js', $script_asset['url'], ['jquery'], wps_core()->debug ? time() : ($script_asset['version'] ?: WPS_VERSION));
 
     wps_localize([
@@ -25,7 +27,26 @@ function wps_admin_enqueue_scripts(): void
         'wps_reset_module_confirm' => __('Reset %s to factory settings? Current module settings will be overwritten and the cleanup pipeline will run.'),
         'wps_reset_module_success' => __('Module reset completed.'),
         'wps_reset_module_failed'  => __('Module reset failed.'),
+        'autosave_pending'  => __('Unsaved changes'),
+        'autosave_saving'   => __('Saving changes…'),
+        'autosave_saved'    => __('All changes saved'),
+        'autosave_failed'   => __('Changes could not be saved. Please retry.'),
+        'autosave_retry'    => __('Retry save'),
+        'save_unconfirmed'  => __('Settings submitted. Save could not be confirmed.'),
     ]);
+}
+
+/** Load the shared admin design after the consuming plugin's styles. */
+function wps_admin_enqueue_ui(): void
+{
+    if (!wp_style_is('vendor-wps-css', 'enqueued')) {
+        return;
+    }
+
+    $asset = UtilEnv::resolve_asset(dirname(__DIR__), 'assets/css/admin-ui.css');
+    $styles = wp_styles();
+    wp_enqueue_style('vendor-wps-admin-ui', $asset['url'], array_values($styles->queue),
+        wps_core()->debug ? time() : ($asset['version'] ?: WPS_VERSION));
 }
 
 
